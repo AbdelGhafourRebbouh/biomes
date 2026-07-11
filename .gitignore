@@ -1,0 +1,12 @@
+# Frontend dependencies
+frontend/node_modules/
+frontend/dist/
+
+# C++ Build artifacts
+build/
+*.o
+*.obj
+*.exe
+
+# IDE files
+.vscode/
