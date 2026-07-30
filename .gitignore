@@ -1,12 +1,25 @@
-# Frontend dependencies
+# Frontend dependencies & build outputs
 frontend/node_modules/
 frontend/dist/
 
-# C++ Build artifacts
+# C++ Build artifacts & Executables
 build/
+bin/
 *.o
 *.obj
 *.exe
+*.dll
 
-# IDE files
+# Debug files (MSVC / MinGW PDBs & ILKs)
+*.pdb
+*.ilk
+*.idb
+
+# Temporary test / scratch files
+test.cpp
+test.exe
+
+# IDE & Editor settings
 .vscode/
+.idea/
+*.swp

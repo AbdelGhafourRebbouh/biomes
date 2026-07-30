@@ -4,10 +4,11 @@
 #include <vector>
 using namespace std;
 
+/// Represents metadata for a single captured desktop window
 struct WindowInfo {
-    HWND hwnd;
-    string title;
-    RECT rect;
+    HWND hwnd;          // Unique handle (ID) identifying the window in Windows OS
+    std::string title;  // Title bar text of the window
+    RECT rect;          // Screen position and dimensions
 };
 
 class WindowScaler {
