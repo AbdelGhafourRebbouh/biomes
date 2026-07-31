@@ -1,0 +1,46 @@
+{
+    "biome_name": "Coding & Research",
+    "boxes": [
+        {
+            "assigned_app_path": "Obsidian.exe",
+            "assigned_app_title": "",
+            "id": 0,
+            "monitor_device": "\\\\.\\DISPLAY1",
+            "rel_height": 0.9609375,
+            "rel_width": 0.483162522315979,
+            "rel_x": 0.010980966500937939,
+            "rel_y": 0.01953125
+        },
+        {
+            "assigned_app_path": "chrome.exe",
+            "assigned_app_title": "",
+            "id": 1,
+            "monitor_device": "\\\\.\\DISPLAY1",
+            "rel_height": 0.9609375,
+            "rel_width": 0.483162522315979,
+            "rel_x": 0.5051244497299194,
+            "rel_y": 0.01953125
+        },
+        {
+            "assigned_app_path": "Code.exe",
+            "assigned_app_title": "",
+            "id": 0,
+            "monitor_device": "\\\\.\\DISPLAY2",
+            "rel_height": 0.9722222089767456,
+            "rel_width": 0.4880208373069763,
+            "rel_x": 0.0078125,
+            "rel_y": 0.013888888992369175
+        },
+        {
+            "assigned_app_path": "",
+            "assigned_app_title": "",
+            "id": 1,
+            "monitor_device": "\\\\.\\DISPLAY2",
+            "rel_height": 0.9722222089767456,
+            "rel_width": 0.4880208373069763,
+            "rel_x": 0.5036458373069763,
+            "rel_y": 0.013888888992369175
+        }
+    ],
+    "hotkey": "CTRL+ALT+C"
+}

@@ -3,16 +3,28 @@
 #include <string>
 #include <vector>
 #include <utility>
+#include "monitor_manager.hpp"
 
 struct GridBox {
     int id;
+    
+    // Absolute Pixel Coordinates (for live positioning on screen)
     int x;
     int y;
     int width;
     int height;
-    std::string assignedAppTitle;
+
+    // Normalized Relative Coordinates (0.0f to 1.0f) for JSON persistence
+    float relX = 0.0f;
+    float relY = 0.0f;
+    float relWidth = 0.0f;
+    float relHeight = 0.0f;
+
+    std::string assignedAppPath;  
+    std::string assignedAppTitle; 
+    std::string monitorDeviceName; // e.g. "\\.\DISPLAY1"
 };
-// enum class is for scoping the enum values to avoid name clashes and improve code clarity
+
 enum class SplitDirection { NONE, HORIZONTAL, VERTICAL };
 
 struct TreeNode {
@@ -24,11 +36,9 @@ struct TreeNode {
 
 class BiomeManager {
 public:
-    // Mode A: WindowGrid Matrix Generator 
-    // Calculates pixel coordinates for a matrix of rows and columns
-    static std::vector<GridBox> GenerateWindowGrid(int screenWidth, int screenHeight, int rows, int cols, int gap);
+    // Generate Matrix Grid specifically for a targeted monitor
+    static std::vector<GridBox> GenerateWindowGridForMonitor(const MonitorDetail& monitor, int rows, int cols, int gap);
 
-    // Mode B: Hyprland Split Logic 
-    // Takes a parent box and splits it into two equal children
-    static std::pair<GridBox, GridBox> SplitBox(const GridBox& parent, SplitDirection direction, int gap);
+    // Apply layout positions across target monitors
+    static void ApplyLayout(const std::vector<GridBox>& layout);
 };

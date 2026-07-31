@@ -1,58 +1,67 @@
-#include "../include/core/window_scaler.hpp"
+#include "../include/core/monitor_manager.hpp"
 #include "../include/core/biome_manager.hpp"
+#include "../include/core/window_scaler.hpp"
+#include "../include/core/json_manager.hpp"
 #include <iostream>
 
 int main() {
     std::cout << "========================================" << std::endl;
-    std::cout << "--- TESTING PHASE 2: LAYOUT ENGINE ---" << std::endl;
+    std::cout << "--- TESTING JSON SAVE & LOAD SYSTEM ---" << std::endl;
     std::cout << "========================================\n" << std::endl;
 
-    // Simulate a standard 1080p monitor screen space
-    int screenWidth = 1920;
-    int screenHeight = 1080;
-    int gap = 10;
-
-    // ------------------------------------------------------------------
-    // TEST 1: Mode A - WindowGrid Matrix (3 Rows x 4 Columns)
-    // ------------------------------------------------------------------
-    std::cout << "--- Mode A: WindowGrid Matrix (3x4) ---" << std::endl;
-    std::vector<GridBox> grid = BiomeManager::GenerateWindowGrid(screenWidth, screenHeight, 3, 4, gap);
-
-    std::cout << "Generated " << grid.size() << " grid boxes:\n" << std::endl;
-    for (size_t i = 0; i < grid.size() && i < 4; ++i) { // Print first 4 boxes
-        std::cout << "Box [" << grid[i].id << "] -> Position: (" 
-                  << grid[i].x << ", " << grid[i].y << ") | Dimensions: " 
-                  << grid[i].width << "x" << grid[i].height << "px" << std::endl;
+    auto monitors = MonitorManager::GetConnectedMonitors();
+    if (monitors.size() < 2) {
+        std::cout << "Requires 2 connected monitors for this test!" << std::endl;
+        return 0;
     }
 
-    std::cout << "\n----------------------------------------\n" << std::endl;
+    // 1. Build Multi-Monitor Grid Layout
+    auto mon0Layout = BiomeManager::GenerateWindowGridForMonitor(monitors[0], 1, 2, 15);
+    auto mon1Layout = BiomeManager::GenerateWindowGridForMonitor(monitors[1], 1, 2, 15);
 
-    // ------------------------------------------------------------------
-    // TEST 2: Mode B - Hyprland Dynamic Binary Split
-    // ------------------------------------------------------------------
-    std::cout << "--- Mode B: Hyprland Binary Split ---" << std::endl;
-    
-    // Master Box (Full Screen minus padding)
-    GridBox master;
-    master.id = 0;
-    master.x = gap;
-    master.y = gap;
-    master.width = screenWidth - (2 * gap);
-    master.height = screenHeight - (2 * gap);
+    mon1Layout[0].assignedAppPath = "Code.exe";
+    mon0Layout[0].assignedAppPath = "Obsidian.exe";
+    mon0Layout[1].assignedAppPath = "chrome.exe";
 
-    std::cout << "Master Box: " << master.width << "x" << master.height << "px" << std::endl;
+    BiomeProfile originalProfile;
+    originalProfile.name = "Coding & Research";
+    originalProfile.hotkey = "CTRL+ALT+C";
+    originalProfile.layout.insert(originalProfile.layout.end(), mon0Layout.begin(), mon0Layout.end());
+    originalProfile.layout.insert(originalProfile.layout.end(), mon1Layout.begin(), mon1Layout.end());
 
-    // First Split: Vertical (Cut into Left and Right child boxes)
-    auto [left, right] = BiomeManager::SplitBox(master, SplitDirection::VERTICAL, gap);
-    std::cout << "\nAfter Vertical Split:" << std::endl;
-    std::cout << "  Left Child:  (" << left.x << ", " << left.y << ") | " << left.width << "x" << left.height << "px" << std::endl;
-    std::cout << "  Right Child: (" << right.x << ", " << right.y << ") | " << right.width << "x" << right.height << "px" << std::endl;
+    // 2. Save profile to JSON file
+    std::string filename = "coding_biome.json";
+    if (JsonManager::SaveBiomeToFile(filename, originalProfile)) {
+        std::cout << "[SUCCESS] Saved profile '" << originalProfile.name << "' to " << filename << std::endl;
+    } else {
+        std::cout << "[FAILED] Could not save JSON profile!" << std::endl;
+        return 0;
+    }
 
-    // Second Split: Split the Right Child Horizontally (Top and Bottom)
-    auto [topRight, bottomRight] = BiomeManager::SplitBox(right, SplitDirection::HORIZONTAL, gap);
-    std::cout << "\nAfter Splitting Right Child Horizontally:" << std::endl;
-    std::cout << "  Top Right Box:    (" << topRight.x << ", " << topRight.y << ") | " << topRight.width << "x" << topRight.height << "px" << std::endl;
-    std::cout << "  Bottom Right Box: (" << bottomRight.x << ", " << bottomRight.y << ") | " << bottomRight.width << "x" << bottomRight.height << "px" << std::endl;
+    // 3. Load profile from JSON file
+    BiomeProfile loadedProfile;
+    if (JsonManager::LoadBiomeFromFile(filename, loadedProfile)) {
+        std::cout << "[SUCCESS] Loaded profile '" << loadedProfile.name 
+                  << "' (Hotkey: " << loadedProfile.hotkey << ") from JSON!\n" << std::endl;
+
+        // Convert stored percentage bounds back into pixel screen coordinates for target monitors
+        for (auto& box : loadedProfile.layout) {
+            MonitorDetail targetMon;
+            if (MonitorManager::GetMonitorByName(box.monitorDeviceName, targetMon)) {
+                box.x = targetMon.rect.left + static_cast<int>(box.relX * targetMon.width);
+                box.y = targetMon.rect.top + static_cast<int>(box.relY * targetMon.height);
+                box.width = static_cast<int>(box.relWidth * targetMon.width);
+                box.height = static_cast<int>(box.relHeight * targetMon.height);
+            }
+        }
+
+        std::cout << "Applying loaded JSON layout in 3 seconds..." << std::endl;
+        Sleep(3000);
+
+        BiomeManager::ApplyLayout(loadedProfile.layout);
+    } else {
+        std::cout << "[FAILED] Could not load JSON profile!" << std::endl;
+    }
 
     return 0;
 }

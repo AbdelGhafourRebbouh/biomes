@@ -1,6 +1,6 @@
 #include "../../include/core/window_scaler.hpp"
 #include <iostream>
-
+#include <psapi.h> // Required for QueryFullProcessImageNameA
 
 // Callback function executed by Windows for every top-level window found
 BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
@@ -20,14 +20,34 @@ BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
         // lParam is a generic 64-bit integer / void pointer
 
         RECT r;
-        //window's screen coordinates
-
+        // window's screen coordinates
         GetWindowRect(hwnd, &r); 
-        windows->push_back({ hwnd, std::string(title), r });
+
+        // Extract Process ID & Executable Name (e.g., "Obsidian.exe", "Code.exe")
+        DWORD processId;
+        GetWindowThreadProcessId(hwnd, &processId);
+
+        HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
+        std::string exeName = "";
+
+        if (hProcess) {
+            char path[MAX_PATH];
+            DWORD size = MAX_PATH;
+            if (QueryFullProcessImageNameA(hProcess, 0, path, &size)) {
+                std::string fullPath(path);
+                size_t lastSlash = fullPath.find_last_of("\\/");
+                if (lastSlash != std::string::npos) {
+                    exeName = fullPath.substr(lastSlash + 1); // Extract filename
+                }
+            }
+            CloseHandle(hProcess);
+        }
+
+        // Push struct containing hwnd, title, rect, and processName
+        windows->push_back({ hwnd, std::string(title), r, exeName });
     }
     return TRUE;
 }
-
 
 // Safely moves and resizes a valid window without changing its layering order (Z-order)
 void WindowScaler::SetPosition(HWND hwnd, int x, int y, int width, int height) {
@@ -38,13 +58,13 @@ void WindowScaler::SetPosition(HWND hwnd, int x, int y, int width, int height) {
     }
 }
 
-
 // Scans the OS and returns a list of all visible top-level windows
 std::vector<WindowInfo> WindowScaler::GetActiveWindows() {
     std::vector<WindowInfo> windows;
     EnumWindows(EnumWindowsProc, reinterpret_cast<LPARAM>(&windows));
     return windows;
 }
+
 // pressing the shourcut keys win + D to minimize all windows and show the desktop
 void WindowScaler::ShowDesktop() {
     // 1. Press down Left Windows key
