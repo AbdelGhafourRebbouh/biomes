@@ -2,49 +2,14 @@
 #include "../include/core/biome_manager.hpp"
 #include "../include/core/window_scaler.hpp"
 #include "../include/core/json_manager.hpp"
+#include "../include/core/hotkey_manager.hpp"
 #include <iostream>
 
-int main() {
-    std::cout << "========================================" << std::endl;
-    std::cout << "--- TESTING JSON SAVE & LOAD SYSTEM ---" << std::endl;
-    std::cout << "========================================\n" << std::endl;
-
-    auto monitors = MonitorManager::GetConnectedMonitors();
-    if (monitors.size() < 2) {
-        std::cout << "Requires 2 connected monitors for this test!" << std::endl;
-        return 0;
-    }
-
-    // 1. Build Multi-Monitor Grid Layout
-    auto mon0Layout = BiomeManager::GenerateWindowGridForMonitor(monitors[0], 1, 2, 15);
-    auto mon1Layout = BiomeManager::GenerateWindowGridForMonitor(monitors[1], 1, 2, 15);
-
-    mon1Layout[0].assignedAppPath = "Code.exe";
-    mon0Layout[0].assignedAppPath = "Obsidian.exe";
-    mon0Layout[1].assignedAppPath = "chrome.exe";
-
-    BiomeProfile originalProfile;
-    originalProfile.name = "Coding & Research";
-    originalProfile.hotkey = "CTRL+ALT+C";
-    originalProfile.layout.insert(originalProfile.layout.end(), mon0Layout.begin(), mon0Layout.end());
-    originalProfile.layout.insert(originalProfile.layout.end(), mon1Layout.begin(), mon1Layout.end());
-
-    // 2. Save profile to JSON file
-    std::string filename = "coding_biome.json";
-    if (JsonManager::SaveBiomeToFile(filename, originalProfile)) {
-        std::cout << "[SUCCESS] Saved profile '" << originalProfile.name << "' to " << filename << std::endl;
-    } else {
-        std::cout << "[FAILED] Could not save JSON profile!" << std::endl;
-        return 0;
-    }
-
-    // 3. Load profile from JSON file
+void ExecuteBiomeProfile(const std::string& profilePath) {
     BiomeProfile loadedProfile;
-    if (JsonManager::LoadBiomeFromFile(filename, loadedProfile)) {
-        std::cout << "[SUCCESS] Loaded profile '" << loadedProfile.name 
-                  << "' (Hotkey: " << loadedProfile.hotkey << ") from JSON!\n" << std::endl;
+    if (JsonManager::LoadBiomeFromFile(profilePath, loadedProfile)) {
+        std::cout << "\n>>> HOTKEY TRIGGERED: Loading Biome '" << loadedProfile.name << "' <<<" << std::endl;
 
-        // Convert stored percentage bounds back into pixel screen coordinates for target monitors
         for (auto& box : loadedProfile.layout) {
             MonitorDetail targetMon;
             if (MonitorManager::GetMonitorByName(box.monitorDeviceName, targetMon)) {
@@ -55,12 +20,45 @@ int main() {
             }
         }
 
-        std::cout << "Applying loaded JSON layout in 3 seconds..." << std::endl;
-        Sleep(3000);
-
         BiomeManager::ApplyLayout(loadedProfile.layout);
-    } else {
-        std::cout << "[FAILED] Could not load JSON profile!" << std::endl;
+    }
+}
+
+int main() {
+    std::cout << "========================================" << std::endl;
+    std::cout << "--- TESTING GLOBAL HOTKEY ENGINE ---" << std::endl;
+    std::cout << "========================================\n" << std::endl;
+
+    std::string profileFile = "coding_biome.json";
+
+    // Parse "CTRL+ALT+C" and register with OS
+    UINT modifiers = 0;
+    UINT vkKey = 0;
+    std::string hotkeyString = "CTRL+ALT+C";
+
+    if (HotkeyManager::ParseHotkeyString(hotkeyString, modifiers, vkKey)) {
+        int HOTKEY_ID = 1;
+        if (HotkeyManager::RegisterGlobalHotkey(HOTKEY_ID, modifiers, vkKey)) {
+            std::cout << "[SUCCESS] Global Hotkey '" << hotkeyString << "' registered with Windows!" << std::endl;
+            std::cout << "Press " << hotkeyString << " anywhere on your computer to trigger Biome layout snapping.\n" << std::endl;
+            std::cout << "Listening for hotkey... (Press Ctrl+C in terminal to stop)\n" << std::endl;
+
+            // Windows Event Message Loop to listen for global OS hotkeys
+            MSG msg = { 0 };
+            while (GetMessage(&msg, NULL, 0, 0) != 0) {
+                if (msg.message == WM_HOTKEY) {
+                    if (msg.wParam == HOTKEY_ID) {
+                        ExecuteBiomeProfile(profileFile);
+                    }
+                }
+                TranslateMessage(&msg);
+                DispatchMessage(&msg);
+            }
+
+            HotkeyManager::UnregisterGlobalHotkey(HOTKEY_ID);
+        } else {
+            std::cout << "[FAILED] Could not register hotkey with Windows OS." << std::endl;
+        }
     }
 
     return 0;

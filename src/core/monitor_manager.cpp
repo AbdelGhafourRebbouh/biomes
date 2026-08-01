@@ -1,4 +1,5 @@
 #include "../../include/core/monitor_manager.hpp"
+using namespace std;
 
 // Win32 Monitor Enumeration Callback
 BOOL CALLBACK MonitorEnumCallback(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData) {
@@ -20,13 +21,13 @@ BOOL CALLBACK MonitorEnumCallback(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprc
     return TRUE;
 }
 
-std::vector<MonitorDetail> MonitorManager::GetConnectedMonitors() {
-    std::vector<MonitorDetail> monitors;
+vector<MonitorDetail> MonitorManager::GetConnectedMonitors() {
+    vector<MonitorDetail> monitors;
     EnumDisplayMonitors(NULL, NULL, MonitorEnumCallback, reinterpret_cast<LPARAM>(&monitors));
     return monitors;
 }
 
-bool MonitorManager::GetMonitorByName(const std::string& deviceName, MonitorDetail& outMonitor) {
+bool MonitorManager::GetMonitorByName(const string& deviceName, MonitorDetail& outMonitor) {
     auto monitors = GetConnectedMonitors();
     for (const auto& mon : monitors) {
         if (mon.deviceName == deviceName) {

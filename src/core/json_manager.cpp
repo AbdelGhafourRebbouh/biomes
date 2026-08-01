@@ -2,10 +2,10 @@
 #include "../../include/external/nlohmann/json.hpp"
 #include <fstream>
 #include <iostream>
-
+using namespace std;
 using json = nlohmann::json;
 
-bool JsonManager::SaveBiomeToFile(const std::string& filePath, const BiomeProfile& profile) {
+bool JsonManager::SaveBiomeToFile(const string& filePath, const BiomeProfile& profile) {
     try {
         json j;
         j["biome_name"] = profile.name;
@@ -32,22 +32,22 @@ bool JsonManager::SaveBiomeToFile(const std::string& filePath, const BiomeProfil
 
         j["boxes"] = boxesArray;
 
-        std::ofstream file(filePath);
+        ofstream file(filePath);
         if (!file.is_open()) return false;
 
         file << j.dump(4); // Formatted JSON with 4-space indentation
         file.close();
         return true;
     } 
-    catch (const std::exception& e) {
-        std::cerr << "JSON Save Error: " << e.what() << std::endl;
+    catch (const exception& e) {
+        cerr << "JSON Save Error: " << e.what() << endl;
         return false;
     }
 }
 
-bool JsonManager::LoadBiomeFromFile(const std::string& filePath, BiomeProfile& outProfile) {
+bool JsonManager::LoadBiomeFromFile(const string& filePath, BiomeProfile& outProfile) {
     try {
-        std::ifstream file(filePath);
+        ifstream file(filePath);
         if (!file.is_open()) return false;
 
         json j;
@@ -80,8 +80,8 @@ bool JsonManager::LoadBiomeFromFile(const std::string& filePath, BiomeProfile& o
 
         return true;
     } 
-    catch (const std::exception& e) {
-        std::cerr << "JSON Load Error: " << e.what() << std::endl;
+    catch (const exception& e) {
+        cerr << "JSON Load Error: " << e.what() << endl;
         return false;
     }
 }
