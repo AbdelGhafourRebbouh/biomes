@@ -1,46 +1,84 @@
 {
-    "biome_name": "Coding & Research",
     "boxes": [
         {
-            "assigned_app_path": "Obsidian.exe",
-            "assigned_app_title": "",
-            "id": 0,
-            "monitor_device": "\\\\.\\DISPLAY1",
-            "rel_height": 0.9609375,
-            "rel_width": 0.483162522315979,
-            "rel_x": 0.010980966500937939,
-            "rel_y": 0.01953125
-        },
-        {
-            "assigned_app_path": "chrome.exe",
-            "assigned_app_title": "",
+            "assignedApp": "",
+            "endCol": 8,
+            "endRow": 5,
             "id": 1,
-            "monitor_device": "\\\\.\\DISPLAY1",
-            "rel_height": 0.9609375,
-            "rel_width": 0.483162522315979,
-            "rel_x": 0.5051244497299194,
-            "rel_y": 0.01953125
+            "monitorIndex": 1,
+            "relHeight": 0.625,
+            "relWidth": 0.5713541507720947,
+            "relX": 0.0,
+            "relY": 0.0,
+            "startCol": 0,
+            "startRow": 0
         },
         {
-            "assigned_app_path": "Code.exe",
-            "assigned_app_title": "",
-            "id": 0,
-            "monitor_device": "\\\\.\\DISPLAY2",
-            "rel_height": 0.9722222089767456,
-            "rel_width": 0.4880208373069763,
-            "rel_x": 0.0078125,
-            "rel_y": 0.013888888992369175
+            "assignedApp": "",
+            "endCol": 14,
+            "endRow": 5,
+            "id": 2,
+            "monitorIndex": 1,
+            "relHeight": 0.625,
+            "relWidth": 0.4286458194255829,
+            "relX": 0.5713541507720947,
+            "relY": 0.0,
+            "startCol": 8,
+            "startRow": 0
         },
         {
-            "assigned_app_path": "",
-            "assigned_app_title": "",
-            "id": 1,
-            "monitor_device": "\\\\.\\DISPLAY2",
-            "rel_height": 0.9722222089767456,
-            "rel_width": 0.4880208373069763,
-            "rel_x": 0.5036458373069763,
-            "rel_y": 0.013888888992369175
+            "assignedApp": "",
+            "endCol": 6,
+            "endRow": 8,
+            "id": 3,
+            "monitorIndex": 0,
+            "relHeight": 1.0,
+            "relWidth": 0.42825767397880554,
+            "relX": 0.0,
+            "relY": 0.0,
+            "startCol": 0,
+            "startRow": 0
+        },
+        {
+            "assignedApp": "",
+            "endCol": 14,
+            "endRow": 8,
+            "id": 4,
+            "monitorIndex": 0,
+            "relHeight": 1.0,
+            "relWidth": 0.5717422962188721,
+            "relX": 0.42825767397880554,
+            "relY": 0.0,
+            "startCol": 6,
+            "startRow": 0
+        },
+        {
+            "assignedApp": "",
+            "endCol": 5,
+            "endRow": 8,
+            "id": 5,
+            "monitorIndex": 1,
+            "relHeight": 0.375,
+            "relWidth": 0.3567708432674408,
+            "relX": 0.0,
+            "relY": 0.625,
+            "startCol": 0,
+            "startRow": 5
+        },
+        {
+            "assignedApp": "",
+            "endCol": 14,
+            "endRow": 8,
+            "id": 6,
+            "monitorIndex": 1,
+            "relHeight": 0.375,
+            "relWidth": 0.6432291865348816,
+            "relX": 0.3567708432674408,
+            "relY": 0.625,
+            "startCol": 5,
+            "startRow": 5
         }
     ],
-    "hotkey": "CTRL+ALT+C"
+    "hotkey": "CTRL+ALT+C",
+    "name": "Coding Workspace"
 }

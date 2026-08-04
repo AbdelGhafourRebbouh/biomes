@@ -8,13 +8,70 @@
 
 using namespace std;
 
-string ExpandPath(const string& inputPath) {
+// Initialize static window position cache
+std::map<HWND, RECT> BiomeManager::s_OriginalWindowPositions;
+
+// Helper to expand environment strings like %localappdata%
+static string ExpandPath(const string& inputPath) {
     char expanded[MAX_PATH];
     DWORD res = ExpandEnvironmentStringsA(inputPath.c_str(), expanded, MAX_PATH);
     if (res > 0 && res <= MAX_PATH) {
         return string(expanded);
     }
     return inputPath;
+}
+
+// ----------------------------------------------------------------------
+// Windows Registry & Directory App Path Resolver
+// ----------------------------------------------------------------------
+string BiomeManager::ResolveAppPath(const string& appExe) {
+    if (appExe.empty()) return "";
+
+    // 1. If it's already an absolute existing file path, return it directly
+    DWORD dwAttrib = GetFileAttributesA(appExe.c_str());
+    if (dwAttrib != INVALID_FILE_ATTRIBUTES && !(dwAttrib & FILE_ATTRIBUTE_DIRECTORY)) {
+        return appExe;
+    }
+
+    // Extract binary name if a full path was provided
+    string exeName = appExe;
+    size_t lastSlash = exeName.find_last_of("\\/");
+    if (lastSlash != string::npos) {
+        exeName = exeName.substr(lastSlash + 1);
+    }
+
+    // 2. Query Windows Registry (HKLM and HKCU App Paths)
+    string regSubKey = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\" + exeName;
+    char pathBuffer[MAX_PATH];
+    DWORD bufferSize = sizeof(pathBuffer);
+    HKEY hKey;
+
+    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, regSubKey.c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS ||
+        RegOpenKeyExA(HKEY_CURRENT_USER, regSubKey.c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        
+        if (RegQueryValueExA(hKey, NULL, NULL, NULL, (LPBYTE)pathBuffer, &bufferSize) == ERROR_SUCCESS) {
+            RegCloseKey(hKey);
+            return string(pathBuffer);
+        }
+        RegCloseKey(hKey);
+    }
+
+    // 3. Fallback: Search common Windows AppData installation folders
+    vector<string> fallbackTemplates = {
+        "%localappdata%\\Programs\\" + exeName.substr(0, exeName.find_last_of('.')) + "\\" + exeName,
+        "%localappdata%\\Programs\\Obsidian\\" + exeName,
+        "%programfiles%\\" + exeName,
+        "%programfiles(x86)%\\" + exeName
+    };
+
+    for (const auto& pathTpl : fallbackTemplates) {
+        string testPath = ExpandPath(pathTpl);
+        if (GetFileAttributesA(testPath.c_str()) != INVALID_FILE_ATTRIBUTES) {
+            return testPath;
+        }
+    }
+
+    return appExe;
 }
 
 // ----------------------------------------------------------------------
@@ -66,7 +123,7 @@ vector<GridBox> BiomeManager::GenerateWindowGridForMonitor(const MonitorDetail& 
 void BiomeManager::ApplyLayout(const vector<GridBox>& layout) {
     bool launchedAnyApp = false;
 
-    // Helper lambda to scan windows and snap matching boxes
+    // Helper lambda to scan active windows and snap matching grid boxes
     auto PerformSnappingPass = [&](const vector<GridBox>& gridLayout) {
         vector<WindowInfo> activeWindows = WindowScaler::GetActiveWindows();
 
@@ -93,6 +150,14 @@ void BiomeManager::ApplyLayout(const vector<GridBox>& layout) {
                 }
 
                 if (matches) {
+                    // Cache original window position before snapping (if not cached already)
+                    if (s_OriginalWindowPositions.find(win.hwnd) == s_OriginalWindowPositions.end()) {
+                        RECT rect;
+                        if (GetWindowRect(win.hwnd, &rect)) {
+                            s_OriginalWindowPositions[win.hwnd] = rect;
+                        }
+                    }
+
                     if (IsIconic(win.hwnd) || IsZoomed(win.hwnd)) {
                         ShowWindow(win.hwnd, SW_RESTORE);
                     } else {
@@ -111,10 +176,10 @@ void BiomeManager::ApplyLayout(const vector<GridBox>& layout) {
         }
     };
 
-    // PASS 1: Snap all already-running applications
+    // PASS 1: Snap running applications
     PerformSnappingPass(layout);
 
-    // AUTO-LAUNCH CHECK: Launch missing apps
+    // AUTO-LAUNCH CHECK: Launch missing apps via Registry-resolved path
     vector<WindowInfo> activeWindows = WindowScaler::GetActiveWindows();
     for (const auto& box : layout) {
         if (box.assignedAppPath.empty() && box.assignedAppTitle.empty()) continue;
@@ -134,24 +199,49 @@ void BiomeManager::ApplyLayout(const vector<GridBox>& layout) {
         }
 
         if (!running && !box.assignedAppPath.empty()) {
-            string targetPath = ExpandPath(box.assignedAppPath);
-            cout << "  [AUTO-LAUNCHING] " << targetPath << " for Box " << box.id << "..." << endl;
+            // Resolve path through Windows Registry dynamically
+            string resolvedPath = ResolveAppPath(box.assignedAppPath);
+            cout << "  [AUTO-LAUNCHING] " << resolvedPath << " for Box " << box.id << "..." << endl;
             
-            HINSTANCE result = ShellExecuteA(NULL, "open", targetPath.c_str(), NULL, NULL, SW_SHOWNORMAL);
-            if ((INT_PTR)result <= 32 && !exeName.empty()) {
-                string localAppDataPath = ExpandPath("%localappdata%\\Programs\\obsidian\\" + exeName);
-                if (_stricmp(exeName.c_str(), "Obsidian.exe") == 0) {
-                    ShellExecuteA(NULL, "open", localAppDataPath.c_str(), NULL, NULL, SW_SHOWNORMAL);
-                }
+            HINSTANCE result = ShellExecuteA(NULL, "open", resolvedPath.c_str(), NULL, NULL, SW_SHOWNORMAL);
+            if ((INT_PTR)result > 32) {
+                launchedAnyApp = true;
             }
-            launchedAnyApp = true;
         }
     }
 
-    // PASS 2: If we launched an app, wait 1.5 seconds for window handle to render, then re-snap!
+    // PASS 2: Deferred snap buffer for launched apps
     if (launchedAnyApp) {
         cout << "  [WAITING] Allowing launched applications to initialize window handles..." << endl;
         this_thread::sleep_for(chrono::milliseconds(1500));
         PerformSnappingPass(layout);
+    }
+}
+
+// ----------------------------------------------------------------------
+// Restore Layout: Put windows back to pre-snapped sizes or minimize
+// ----------------------------------------------------------------------
+void BiomeManager::RestoreLayout(const vector<GridBox>& layout) {
+    vector<WindowInfo> activeWindows = WindowScaler::GetActiveWindows();
+
+    for (const auto& box : layout) {
+        string exeName = box.assignedAppPath;
+        size_t lastSlash = exeName.find_last_of("\\/");
+        if (lastSlash != string::npos) exeName = exeName.substr(lastSlash + 1);
+
+        for (const auto& win : activeWindows) {
+            if (!exeName.empty() && _stricmp(win.processName.c_str(), exeName.c_str()) == 0) {
+                auto it = s_OriginalWindowPositions.find(win.hwnd);
+                if (it != s_OriginalWindowPositions.end()) {
+                    RECT orig = it->second;
+                    int width = orig.right - orig.left;
+                    int height = orig.bottom - orig.top;
+                    WindowScaler::SetPosition(win.hwnd, orig.left, orig.top, width, height);
+                    cout << "  [RESTORED] " << win.processName << " back to original size." << endl;
+                } else {
+                    ShowWindow(win.hwnd, SW_MINIMIZE);
+                }
+            }
+        }
     }
 }

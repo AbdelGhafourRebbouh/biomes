@@ -1,13 +1,13 @@
 #pragma once
 #include <string>
 #include <vector>
-#include "biome_manager.hpp"
+#include "../ui/grid_overlay.hpp"
 
 // Structure representing a full user workspace profile
 struct BiomeProfile {
     std::string name;             // Profile Name (e.g., "Coding", "Research")
     std::string hotkey;           // Keyboard shortcut combo (e.g., "CTRL+ALT+C")
-    std::vector<GridBox> layout;  // Assigned boxes across all monitors
+    std::vector<SelectedBox> layout; // Target grid regions across all monitors
 };
 
 class JsonManager {
