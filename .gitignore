@@ -23,3 +23,12 @@ test.exe
 .vscode/
 .idea/
 *.swp
+
+# Temporary WebView2 cache runtime folder
+webview_data/
+
+# Compiled Executables and Libraries
+*.exe
+*.dll
+*.o
+*.a

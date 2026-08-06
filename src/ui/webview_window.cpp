@@ -1,177 +1,273 @@
-#include "../../include/ui/webview_window.hpp"
+#include <windows.h>
+#include <unknwn.h>
+#include <objbase.h>
+#include <winerror.h>
+
 #include <iostream>
 #include <string>
+#include <functional>
 
-#include <windows.h>
-#include <initguid.h> // Resolves undefined reference to IID_IUnknown and __uuidof
-#include <objbase.h>
+#include <WebView2.h>
+#include "../../include/ui/webview_window.hpp"
 
-#include "../../include/external/webview2/WebView2.h"
+// ============================================================================
+// Function Pointer Definition for Dynamic Loading in MinGW
+// ============================================================================
 
-using namespace std;
-
-static ICoreWebView2Controller* webviewController = nullptr;
-static ICoreWebView2* webviewWindow = nullptr;
-
-// Custom COM Handler for Controller Creation
-class EnvironmentCompletedHandler : public ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler {
-private:
-    HWND m_hwnd;
-    string m_startUrl;
-    ULONG m_refCount = 1;
-
-public:
-    EnvironmentCompletedHandler(HWND hwnd, const string& startUrl) : m_hwnd(hwnd), m_startUrl(startUrl) {}
-
-    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppvObject) override {
-        if (riid == IID_IUnknown || riid == IID_ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler) {
-            *ppvObject = static_cast<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler*>(this);
-            AddRef();
-            return S_OK;
-        }
-        *ppvObject = NULL;
-        return E_NOINTERFACE;
-    }
-
-    ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&m_refCount); }
-    ULONG STDMETHODCALLTYPE Release() override {
-        ULONG count = InterlockedDecrement(&m_refCount);
-        if (count == 0) delete this;
-        return count;
-    }
-
-    HRESULT STDMETHODCALLTYPE Invoke(HRESULT result, ICoreWebView2Environment* env) override {
-        if (FAILED(result) || !env) {
-            cout << "[ERROR] Environment creation failed. HRESULT: " << hex << result << endl;
-            return result;
-        }
-
-        class ControllerCompletedHandler : public ICoreWebView2CreateCoreWebView2ControllerCompletedHandler {
-        private:
-            HWND m_hwnd;
-            string m_startUrl;
-            ULONG m_refCount = 1;
-
-        public:
-            ControllerCompletedHandler(HWND hwnd, const string& startUrl) : m_hwnd(hwnd), m_startUrl(startUrl) {}
-
-            HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppvObject) override {
-                if (riid == IID_IUnknown || riid == IID_ICoreWebView2CreateCoreWebView2ControllerCompletedHandler) {
-                    *ppvObject = static_cast<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler*>(this);
-                    AddRef();
-                    return S_OK;
-                }
-                *ppvObject = NULL;
-                return E_NOINTERFACE;
-            }
-
-            ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&m_refCount); }
-            ULONG STDMETHODCALLTYPE Release() override {
-                ULONG count = InterlockedDecrement(&m_refCount);
-                if (count == 0) delete this;
-                return count;
-            }
-
-            HRESULT STDMETHODCALLTYPE Invoke(HRESULT result, ICoreWebView2Controller* controller) override {
-                if (controller != nullptr) {
-                    webviewController = controller;
-                    webviewController->get_CoreWebView2(&webviewWindow);
-
-                    RECT bounds;
-                    GetClientRect(m_hwnd, &bounds);
-                    webviewController->put_Bounds(bounds);
-
-                    wstring wUrl(m_startUrl.begin(), m_startUrl.end());
-                    webviewWindow->Navigate(wUrl.c_str());
-
-                    cout << "[UI] WebView2 loaded successfully at: " << m_startUrl << endl;
-                }
-                return S_OK;
-            }
-        };
-
-        env->CreateCoreWebView2Controller(m_hwnd, new ControllerCompletedHandler(m_hwnd, m_startUrl));
-        return S_OK;
-    }
-};
-
-LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
-    switch (message) {
-    case WM_SIZE:
-        if (webviewController != nullptr) {
-            RECT bounds;
-            GetClientRect(hWnd, &bounds);
-            webviewController->put_Bounds(bounds);
-        }
-        break;
-    case WM_DESTROY:
-        PostQuitMessage(0);
-        break;
-    default:
-        return DefWindowProcA(hWnd, message, wParam, lParam);
-    }
-    return 0;
-}
-
-// Function signature for WebView2Loader entry point
-typedef HRESULT (STDAPICALLTYPE *CreateWebView2EnvFunc)(
+typedef HRESULT (__stdcall *PFN_CreateCoreWebView2EnvironmentWithOptions)(
     PCWSTR browserExecutableFolder,
     PCWSTR userDataFolder,
     ICoreWebView2EnvironmentOptions* environmentOptions,
     ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler* environmentCreatedHandler
 );
 
-bool WebViewWindow::Initialize(HINSTANCE hInstance, int nCmdShow, const string& startUrl) {
-    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+// ============================================================================
+// Native MinGW COM Callback Implementations (Zero WRL dependencies)
+// ============================================================================
 
-    const char CLASS_NAME[] = "BiomesWebViewHost";
+template <typename TInterface>
+class ComCallbackImpl;
 
-    WNDCLASSA wc = { 0 };
-    wc.lpfnWndProc   = WndProc;
+// 1. Environment Creation Callback
+template <>
+class ComCallbackImpl<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler> 
+    : public ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler {
+private:
+    std::function<HRESULT(HRESULT, ICoreWebView2Environment*)> m_func;
+    long m_refCount = 1;
+
+public:
+    ComCallbackImpl(std::function<HRESULT(HRESULT, ICoreWebView2Environment*)> func) 
+        : m_func(std::move(func)) {}
+
+    HRESULT __stdcall QueryInterface(REFIID riid, void** ppv) override {
+        if (!ppv) return E_POINTER;
+        *ppv = static_cast<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler*>(this);
+        AddRef();
+        return S_OK;
+    }
+
+    unsigned long __stdcall AddRef() override { return InterlockedIncrement(&m_refCount); }
+    unsigned long __stdcall Release() override {
+        unsigned long count = InterlockedDecrement(&m_refCount);
+        if (count == 0) { delete this; return 0; }
+        return count;
+    }
+    HRESULT __stdcall Invoke(HRESULT result, ICoreWebView2Environment* created_environment) override {
+        if (m_func) return m_func(result, created_environment);
+        return S_OK;
+    }
+};
+
+// 2. Controller Creation Callback
+template <>
+class ComCallbackImpl<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler> 
+    : public ICoreWebView2CreateCoreWebView2ControllerCompletedHandler {
+private:
+    std::function<HRESULT(HRESULT, ICoreWebView2Controller*)> m_func;
+    long m_refCount = 1;
+
+public:
+    ComCallbackImpl(std::function<HRESULT(HRESULT, ICoreWebView2Controller*)> func) 
+        : m_func(std::move(func)) {}
+
+    HRESULT __stdcall QueryInterface(REFIID riid, void** ppv) override {
+        if (!ppv) return E_POINTER;
+        *ppv = static_cast<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler*>(this);
+        AddRef();
+        return S_OK;
+    }
+
+    unsigned long __stdcall AddRef() override { return InterlockedIncrement(&m_refCount); }
+    unsigned long __stdcall Release() override {
+        unsigned long count = InterlockedDecrement(&m_refCount);
+        if (count == 0) { delete this; return 0; }
+        return count;
+    }
+    HRESULT __stdcall Invoke(HRESULT result, ICoreWebView2Controller* created_controller) override {
+        if (m_func) return m_func(result, created_controller);
+        return S_OK;
+    }
+};
+
+// 3. Web Message Received Callback (IPC)
+template <>
+class ComCallbackImpl<ICoreWebView2WebMessageReceivedEventHandler> 
+    : public ICoreWebView2WebMessageReceivedEventHandler {
+private:
+    std::function<HRESULT(ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs*)> m_func;
+    long m_refCount = 1;
+
+public:
+    ComCallbackImpl(std::function<HRESULT(ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs*)> func) 
+        : m_func(std::move(func)) {}
+
+    HRESULT __stdcall QueryInterface(REFIID riid, void** ppv) override {
+        if (!ppv) return E_POINTER;
+        *ppv = static_cast<ICoreWebView2WebMessageReceivedEventHandler*>(this);
+        AddRef();
+        return S_OK;
+    }
+
+    unsigned long __stdcall AddRef() override { return InterlockedIncrement(&m_refCount); }
+    unsigned long __stdcall Release() override {
+        unsigned long count = InterlockedDecrement(&m_refCount);
+        if (count == 0) { delete this; return 0; }
+        return count;
+    }
+    HRESULT __stdcall Invoke(ICoreWebView2* sender, ICoreWebView2WebMessageReceivedEventArgs* args) override {
+        if (m_func) return m_func(sender, args);
+        return S_OK;
+    }
+};
+
+template <typename TInterface, typename F>
+TInterface* CreateCallbackRaw(F&& func) {
+    return new ComCallbackImpl<TInterface>(std::forward<F>(func));
+}
+
+// ============================================================================
+// Static Member Definitions (Matches include/ui/webview_window.hpp)
+// ============================================================================
+
+HWND WebViewWindow::s_hwnd = nullptr;
+ICoreWebView2Controller* WebViewWindow::s_controller = nullptr;
+ICoreWebView2* WebViewWindow::s_webview = nullptr;
+std::function<void(const std::string&)> WebViewWindow::s_onMessageReceived = nullptr;
+
+bool WebViewWindow::Initialize(HINSTANCE hInstance, int nCmdShow, const std::string& startUrl) {
+    WNDCLASSEXA wc = { sizeof(WNDCLASSEXA) };
+    wc.lpfnWndProc   = WindowProc;
     wc.hInstance     = hInstance;
-    wc.lpszClassName = CLASS_NAME;
+    wc.lpszClassName = "BiomesWebViewWindowClass";
+    wc.hCursor       = LoadCursor(NULL, IDC_ARROW);
     wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
-    wc.hCursor       = LoadCursorA(NULL, (LPCSTR)IDC_ARROW);
 
-    RegisterClassA(&wc);
+    RegisterClassExA(&wc);
 
-    HWND hwnd = CreateWindowExA(
-        0,
-        CLASS_NAME,
+    s_hwnd = CreateWindowExA(
+        0, 
+        "BiomesWebViewWindowClass",
         "Biomes Workspace Engine",
         WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, 1280, 720,
+        CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800,
         NULL, NULL, hInstance, NULL
     );
 
-    if (hwnd == NULL) return false;
+    if (!s_hwnd) return false;
 
-    ShowWindow(hwnd, nCmdShow);
-    UpdateWindow(hwnd);
+    ShowWindow(s_hwnd, nCmdShow);
+    UpdateWindow(s_hwnd);
 
-    cout << "[UI] Host window created. Loading WebView2Loader.dll..." << endl;
+    InitWebView(startUrl);
 
-    // Load DLL dynamically
-    HMODULE hLib = LoadLibraryA("WebView2Loader.dll");
-    if (!hLib) {
-        cout << "[ERROR] Could not load WebView2Loader.dll! Ensure WebView2Loader.dll is in the project root." << endl;
-        return false;
-    }
-
-    CreateWebView2EnvFunc createEnv = (CreateWebView2EnvFunc)GetProcAddress(hLib, "CreateCoreWebView2EnvironmentWithOptions");
-    if (!createEnv) {
-        cout << "[ERROR] Could not locate CreateCoreWebView2EnvironmentWithOptions in DLL." << endl;
-        return false;
-    }
-
-    createEnv(nullptr, nullptr, nullptr, new EnvironmentCompletedHandler(hwnd, startUrl));
     return true;
 }
 
-void WebViewWindow::RunMessageLoop() {
-    MSG msg = { 0 };
-    while (GetMessageA(&msg, NULL, 0, 0)) {
-        TranslateMessage(&msg);
-        DispatchMessageA(&msg);
+void WebViewWindow::InitWebView(const std::string& startUrl) {
+    HMODULE hLoader = LoadLibraryW(L"WebView2Loader.dll");
+    if (!hLoader) {
+        std::cerr << "[WEBVIEW ERROR] Could not load WebView2Loader.dll!" << std::endl;
+        return;
     }
+
+    auto pfnCreateEnvironment = reinterpret_cast<PFN_CreateCoreWebView2EnvironmentWithOptions>(
+        GetProcAddress(hLoader, "CreateCoreWebView2EnvironmentWithOptions")
+    );
+
+    if (!pfnCreateEnvironment) {
+        std::cerr << "[WEBVIEW ERROR] Could not locate CreateCoreWebView2EnvironmentWithOptions inside DLL." << std::endl;
+        return;
+    }
+
+    std::wstring userDataFolder = L"webview_data";
+
+    auto envHandler = CreateCallbackRaw<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
+        [startUrl](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
+            if (FAILED(result) || !env) return result;
+
+            auto controllerHandler = CreateCallbackRaw<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
+                [startUrl](HRESULT res, ICoreWebView2Controller* controller) -> HRESULT {
+                    if (FAILED(res) || !controller) return res;
+
+                    s_controller = controller;
+                    s_controller->AddRef();
+                    
+                    s_controller->get_CoreWebView2(&s_webview);
+
+                    RECT bounds;
+                    GetClientRect(s_hwnd, &bounds);
+                    s_controller->put_Bounds(bounds);
+
+                    EventRegistrationToken token;
+                    auto msgHandler = CreateCallbackRaw<ICoreWebView2WebMessageReceivedEventHandler>(
+                        [](ICoreWebView2* sender, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
+                            LPWSTR jsonString = nullptr;
+                            if (SUCCEEDED(args->get_WebMessageAsJson(&jsonString)) && jsonString) {
+                                std::wstring wMsg(jsonString);
+                                CoTaskMemFree(jsonString);
+
+                                std::string msg(wMsg.begin(), wMsg.end());
+                                if (s_onMessageReceived) s_onMessageReceived(msg);
+                            }
+                            return S_OK;
+                        }
+                    );
+                    s_webview->add_WebMessageReceived(msgHandler, &token);
+
+                    std::wstring wUrl(startUrl.begin(), startUrl.end());
+                    s_webview->Navigate(wUrl.c_str());
+
+                    std::cout << "[WEBVIEW] Successfully loaded: " << startUrl << std::endl;
+                    return S_OK;
+                }
+            );
+
+            env->CreateCoreWebView2Controller(s_hwnd, controllerHandler);
+            return S_OK;
+        }
+    );
+
+    // CALL THE DYNAMIC POINTER (Fixes linker error)
+    pfnCreateEnvironment(nullptr, userDataFolder.c_str(), nullptr, envHandler);
+}
+
+void WebViewWindow::SendMessageToUI(const std::string& jsonPayload) {
+    if (s_webview) {
+        std::wstring wPayload(jsonPayload.begin(), jsonPayload.end());
+        s_webview->PostWebMessageAsJson(wPayload.c_str());
+        std::cout << "[IPC C++ -> JS] Sent payload: " << jsonPayload << std::endl;
+    }
+}
+
+void WebViewWindow::SetMessageReceivedCallback(std::function<void(const std::string&)> callback) {
+    s_onMessageReceived = callback;
+}
+
+void WebViewWindow::RunMessageLoop() {
+    MSG msg = {};
+    while (GetMessage(&msg, NULL, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+}
+
+LRESULT CALLBACK WebViewWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    switch (uMsg) {
+        case WM_SIZE:
+            if (s_controller != nullptr) {
+                RECT bounds;
+                GetClientRect(hwnd, &bounds);
+                s_controller->put_Bounds(bounds);
+            }
+            break;
+        case WM_DESTROY:
+            if (s_webview) { s_webview->Release(); s_webview = nullptr; }
+            if (s_controller) { s_controller->Release(); s_controller = nullptr; }
+            PostQuitMessage(0);
+            break;
+        default:
+            return DefWindowProc(hwnd, uMsg, wParam, lParam);
+    }
+    return 0;
 }

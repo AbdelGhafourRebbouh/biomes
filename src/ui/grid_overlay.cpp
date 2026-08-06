@@ -293,7 +293,15 @@ LRESULT CALLBACK GridOverlay::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                 InvalidateRect(hwnd, NULL, FALSE);
             }
             return 0;
-
+       
+        case WM_DISPLAYCHANGE: 
+            std::cout << "[GRID OVERLAY] Display change detected! Refreshing overlay screen..." << std::endl;
+            
+            // Re-render this overlay window for the new resolution/display state
+            InvalidateRect(hwnd, NULL, TRUE);
+            return 0;
+        
+    
         case WM_KEYDOWN:
             if (wParam == VK_BACK) {
                 if (!s_savedBoxes.empty()) {
@@ -308,6 +316,7 @@ LRESULT CALLBACK GridOverlay::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
 
         case WM_DESTROY:
             return 0;
+            
     }
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }

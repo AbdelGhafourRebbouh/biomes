@@ -1,28 +1,48 @@
 #pragma once
+#ifndef WINDOW_SCALER_HPP
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#define WINDOW_SCALER_HPP
+
 #include <windows.h>
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include "../ui/grid_overlay.hpp"
 
-/// Represents metadata for a single captured desktop window
 struct WindowInfo {
-    HWND hwnd;               // Unique handle (ID) identifying the window in Windows OS
-    std::string title;       // Title bar text of the window
-    RECT rect;               // Screen position and dimensions
-    std::string processName; // Executable process name (e.g., "Obsidian.exe", "Code.exe")
+    HWND hwnd;
+    std::string title;
+    RECT rect;
+    std::string processName;
+};
+
+// Window state storage for restoration
+struct OriginalWindowState {
+    RECT rect;
+    bool isMaximized;
+    bool isMinimized;
 };
 
 class WindowScaler {
 public:
-    // Moves and resizes an open window handle
     static void SetPosition(HWND hwnd, int x, int y, int width, int height);
-
-    // Snaps a window to a SelectedBox target region on its designated monitor
     static bool SnapToBox(HWND hwnd, const SelectedBox& box);
-
-    // Scans all open top-level application windows on Windows OS
     static std::vector<WindowInfo> GetActiveWindows();
-
-    // Minimizes all active windows to expose the desktop background
     static void ShowDesktop();
+
+    // NEW: Restoration Memory
+    static void CacheOriginalPosition(HWND hwnd);
+    static bool RestoreWindowPosition(HWND hwnd);
+    static void RestoreAllCapturedWindows();
+
+    // NEW: Registry Path Resolver
+    static std::string ResolveAppPath(const std::string& processName);
+    static bool LaunchAndSnapApp(const std::string& processName, const SelectedBox& box);
+
+private:
+    static std::unordered_map<HWND, OriginalWindowState> s_originalPositions;
 };
+
+#endif // WINDOW_SCALER_HPP

@@ -1,80 +1,53 @@
-#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #include <iostream>
-#include <vector>
 #include <string>
-#include <algorithm>
-#include "../include/ui/grid_overlay.hpp"
-#include "../include/core/json_manager.hpp"
-#include "../include/core/window_scaler.hpp"
+#include <filesystem>
 
-// Filter out non-interactive OS background host windows
-bool IsUserApp(const WindowInfo& win) {
-    if (win.processName == "TextInputHost.exe") return false;
-    if (win.processName == "ApplicationFrameHost.exe" && win.title.empty()) return false;
-    if (win.processName == "explorer.exe" && win.title.empty()) return false;
-    return true;
-}
+// This links to your header file that we built earlier
+#include "../include/ui/webview_window.hpp"
 
-int main() {
-    std::cout << "=========================================" << std::endl;
-    std::cout << "   [BIOMES] GRID CREATION & TESTING MODE  " << std::endl;
-    std::cout << "=========================================" << std::endl;
-    std::cout << "-> Draw your grid boxes on screen." << std::endl;
-    std::cout << "-> Press ESC when finished to save & snap windows!\n" << std::endl;
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    // 1. CREATE A DEBUG TERMINAL
+    // Windows GUI apps hide text by default. This opens a black terminal window 
+    // so you can see messages printed with std::cout.
+    AllocConsole();
+    freopen_s((FILE**)stdout, "CONOUT$", "w", stdout);
+    freopen_s((FILE**)stderr, "CONOUT$", "w", stderr);
 
-    // 1. Show Creation Overlay
-    if (GridOverlay::ShowOverlay(8, 14)) {
-        MSG msg = {};
-        while (GetMessage(&msg, NULL, 0, 0)) {
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
-        }
+    std::cout << "=== Biomes Workspace Engine Booting Up ===" << std::endl;
+
+    // 2. SET UP JS -> C++ COMMUNICATION
+    // This listens for any message sent from your JavaScript UI (index.html).
+    WebViewWindow::SetMessageReceivedCallback([](const std::string& message) {
+        std::cout << "\n[C++ Core] Heard message from UI: " << message << std::endl;
+
+        // When C++ hears a message, it immediately sends a reply back down to JavaScript (C++ -> JS)
+        std::string reply = "{\"status\":\"success\", \"message\":\"Hello from C++ backend!\"}";
+        WebViewWindow::SendMessageToUI(reply);
+    });
+
+    // 3. FIND index.html AUTOMATICALLY
+    // This finds the folder where app.exe is running, and points directly to index.html next to it.
+    char buffer[MAX_PATH];
+    GetModuleFileNameA(NULL, buffer, MAX_PATH);
+    std::filesystem::path exePath(buffer);
+    std::filesystem::path htmlPath = exePath.parent_path() / "index.html";
+    std::string startUrl = "file:///" + htmlPath.string();
+
+    std::cout << "[WebView] Loading UI from: " << startUrl << std::endl;
+
+    // 4. INITIALIZE THE WINDOW & WEBVIEW
+    // This creates the actual desktop window and injects Microsoft Edge (WebView2) into it.
+    if (!WebViewWindow::Initialize(hInstance, nCmdShow, startUrl)) {
+        std::cerr << "[Error] Failed to create WebView window!" << std::endl;
+        return -1;
     }
 
-    // 2. Retrieve Created Boxes
-    std::vector<SelectedBox> createdBoxes = GridOverlay::GetSavedBoxes();
-    std::cout << "\n[BIOMES] Captured " << createdBoxes.size() << " target grid regions." << std::endl;
+    // 5. START THE WINDOW MESSAGE LOOP
+    // This keeps the app running, listening for mouse clicks, resizing, and keyboard inputs 
+    // until you close the window.
+    WebViewWindow::RunMessageLoop();
 
-    if (createdBoxes.empty()) {
-        std::cout << "[BIOMES] No boxes were created. Exiting." << std::endl;
-        return 0;
-    }
-
-    // 3. Save layout to coding_biome.json
-    BiomeProfile profile;
-    profile.name = "Coding Workspace";
-    profile.hotkey = "CTRL+ALT+C";
-    profile.layout = createdBoxes;
-
-    JsonManager::SaveBiomeToFile("coding_biome.json", profile);
-
-    // 4. Scan active user applications
-    std::vector<WindowInfo> rawWindows = WindowScaler::GetActiveWindows();
-    std::vector<WindowInfo> activeWindows;
-
-    for (const auto& win : rawWindows) {
-        if (IsUserApp(win)) {
-            activeWindows.push_back(win);
-        }
-    }
-
-    std::cout << "\n[BIOMES] Found " << activeWindows.size() << " valid user apps:" << std::endl;
-    for (size_t i = 0; i < activeWindows.size(); ++i) {
-        std::cout << "  [" << i + 1 << "] " << activeWindows[i].processName 
-                  << " -> " << activeWindows[i].title << std::endl;
-    }
-
-    // 5. Snap active windows into target boxes
-    std::cout << "\n[BIOMES] Snapping windows..." << std::endl;
-    size_t snapCount = std::min(activeWindows.size(), profile.layout.size());
-
-    for (size_t i = 0; i < snapCount; ++i) {
-        std::cout << " -> Snapping [" << activeWindows[i].processName 
-                  << "] into Box #" << profile.layout[i].id << "..." << std::endl;
-
-        WindowScaler::SnapToBox(activeWindows[i].hwnd, profile.layout[i]);
-    }
-
-    std::cout << "\n[BIOMES] Done!" << std::endl;
     return 0;
 }

@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Biomes Workspace Engine</title>
+    <style>
+        body {
+            background-color: #121212;
+            color: #ffffff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .card {
+            background-color: #1e1e1e;
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+            text-align: center;
+            max-width: 400px;
+        }
+        button {
+            background-color: #0078d4;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-top: 15px;
+        }
+        button:hover {
+            background-color: #005a9e;
+        }
+        #status {
+            margin-top: 15px;
+            font-size: 13px;
+            color: #a0a0a0;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <h2>🚀 Biomes Workspace UI Active</h2>
+        <p>If you can see this window, your C++ WebView2 host is working!</p>
+        <button id="sendBtn">Send Test Message to C++ Backend</button>
+        <div id="status">Status: Waiting for action...</div>
+    </div>
+
+    <script>
+        const sendBtn = document.getElementById('sendBtn');
+        const statusDiv = document.getElementById('status');
+
+        // 1. Send message to C++ when button is clicked
+        sendBtn.addEventListener('click', () => {
+            if (window.chrome && window.chrome.webview) {
+                window.chrome.webview.postMessage(JSON.stringify({
+                    action: "ping",
+                    payload: "Hello from JavaScript UI!"
+                }));
+                statusDiv.innerText = "Status: Message sent to C++!";
+            } else {
+                statusDiv.innerText = "Status: WebView2 IPC not available.";
+            }
+        });
+
+        // 2. Listen for response messages sent FROM C++ back to JS
+        if (window.chrome && window.chrome.webview) {
+            window.chrome.webview.addEventListener('message', event => {
+                console.log("Received from C++:", event.data);
+                statusDiv.innerText = "Status Received from C++: " + event.data;
+            });
+        }
+    </script>
+</body>
+</html>
