@@ -5,8 +5,10 @@
 
 // Structure representing a full user workspace profile
 struct BiomeProfile {
+    std::string id;               // Stable identifier used by dashboard actions and hotkeys
     std::string name;             // Profile Name (e.g., "Coding", "Research")
     std::string hotkey;           // Keyboard shortcut combo (e.g., "CTRL+ALT+C")
+    std::string coverImagePath;   // Optional local image displayed on the dashboard card
     std::vector<SelectedBox> layout; // Target grid regions across all monitors
 };
 
@@ -17,4 +19,11 @@ public:
 
     // Reads a saved JSON file and populates a BiomeProfile struct
     static bool LoadBiomeFromFile(const std::string& filePath, BiomeProfile& outProfile);
+
+    // Collection API used by the dashboard. A single file contains every saved Biome.
+    static bool SaveBiomesToFile(const std::string& filePath, const std::vector<BiomeProfile>& profiles);
+    static bool LoadBiomesFromFile(const std::string& filePath, std::vector<BiomeProfile>& outProfiles);
+
+    // Compact dashboard-safe representation: id, name, hotkey, cover, and unique app names.
+    static std::string LoadBiomesAsJsonString(const std::string& filePath);
 };

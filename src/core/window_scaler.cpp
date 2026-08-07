@@ -1,22 +1,25 @@
 #include "../../include/core/window_scaler.hpp"
+#include "../../include/ui/grid_overlay.hpp"
 #include <iostream>
 #include <vector>
 #include <string>
 #include <unordered_map>
 #include <windows.h>
 #include <psapi.h>
+#include <shellapi.h>
 
 using namespace std;
 
-// Definition of static map matching header file definition
 std::unordered_map<HWND, OriginalWindowState> WindowScaler::s_originalPositions;
 
-struct MonitorEnumContext {
+namespace {
+
+struct ScalerMonitorEnumContext {
     vector<RECT> rects;
 };
 
-static BOOL CALLBACK ScalerMonitorEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData) {
-    auto* ctx = reinterpret_cast<MonitorEnumContext*>(dwData);
+BOOL CALLBACK ScalerMonitorEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData) {
+    auto* ctx = reinterpret_cast<ScalerMonitorEnumContext*>(dwData);
     MONITORINFO mi = { sizeof(MONITORINFO) };
     if (GetMonitorInfoA(hMonitor, &mi)) {
         ctx->rects.push_back(mi.rcMonitor);
@@ -26,17 +29,18 @@ static BOOL CALLBACK ScalerMonitorEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LP
     return TRUE;
 }
 
-static vector<RECT> GetSystemMonitorRects() {
-    MonitorEnumContext ctx;
+vector<RECT> GetScalerSystemMonitorRects() {
+    ScalerMonitorEnumContext ctx;
     EnumDisplayMonitors(NULL, NULL, ScalerMonitorEnumProc, reinterpret_cast<LPARAM>(&ctx));
     return ctx.rects;
 }
 
-BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
+BOOL CALLBACK ScalerEnumWindowsProc(HWND hwnd, LPARAM lParam) {
     if (!IsWindowVisible(hwnd)) return TRUE;
 
     char title[256];
     GetWindowTextA(hwnd, title, sizeof(title));
+
     if (strlen(title) > 0 && GetWindowTextLengthA(hwnd) > 0) {
         LONG exStyle = GetWindowLongA(hwnd, GWL_EXSTYLE);
         if (exStyle & WS_EX_TOOLWINDOW) return TRUE;
@@ -50,6 +54,7 @@ BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
         GetWindowThreadProcessId(hwnd, &processId);
         HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
         string exeName = "";
+
         if (hProcess) {
             char path[MAX_PATH];
             DWORD size = MAX_PATH;
@@ -68,22 +73,21 @@ BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
     return TRUE;
 }
 
+} // end anonymous namespace
+
 void WindowScaler::SetPosition(HWND hwnd, int x, int y, int width, int height) {
     if (hwnd != NULL && IsWindow(hwnd)) {
-
         CacheOriginalPosition(hwnd);
-        // Un-maximize / restore window if maximized or minimized
+
         if (IsZoomed(hwnd) || IsIconic(hwnd)) {
             ShowWindow(hwnd, SW_RESTORE);
         }
 
-        // Remove WS_MAXIMIZE style bit explicitly
         LONG style = GetWindowLongA(hwnd, GWL_STYLE);
         if (style & WS_MAXIMIZE) {
             SetWindowLongA(hwnd, GWL_STYLE, style & ~WS_MAXIMIZE);
         }
 
-        // Move and snap window
         BOOL res = SetWindowPos(
             hwnd, 
             HWND_TOP, 
@@ -101,7 +105,8 @@ void WindowScaler::SetPosition(HWND hwnd, int x, int y, int width, int height) {
 
 bool WindowScaler::SnapToBox(HWND hwnd, const SelectedBox& box) {
     if (!hwnd || !IsWindow(hwnd)) return false;
-    vector<RECT> monitorRects = GetSystemMonitorRects();
+
+    vector<RECT> monitorRects = GetScalerSystemMonitorRects();
     if (box.monitorIndex < 0 || box.monitorIndex >= static_cast<int>(monitorRects.size())) {
         cerr << "[SCALER] Invalid monitor index: " << box.monitorIndex << endl;
         return false;
@@ -115,15 +120,17 @@ bool WindowScaler::SnapToBox(HWND hwnd, const SelectedBox& box) {
     int targetY = monRect.top + static_cast<int>(box.relY * monHeight);
     int targetW = static_cast<int>(box.relWidth * monWidth);
     int targetH = static_cast<int>(box.relHeight * monHeight);
+
     cout << "[SCALER] Target Bounds -> X:" << targetX << " Y:" << targetY 
          << " W:" << targetW << " H:" << targetH << endl;
+
     SetPosition(hwnd, targetX, targetY, targetW, targetH);
     return true;
 }
 
 vector<WindowInfo> WindowScaler::GetActiveWindows() {
     vector<WindowInfo> windows;
-    EnumWindows(EnumWindowsProc, reinterpret_cast<LPARAM>(&windows));
+    EnumWindows(ScalerEnumWindowsProc, reinterpret_cast<LPARAM>(&windows));
     return windows;
 }
 
@@ -136,6 +143,7 @@ void WindowScaler::ShowDesktop() {
 
 void WindowScaler::CacheOriginalPosition(HWND hwnd) {
     if (!hwnd || !IsWindow(hwnd)) return;
+
     if (s_originalPositions.find(hwnd) == s_originalPositions.end()) {
         OriginalWindowState state;
         GetWindowRect(hwnd, &state.rect);
@@ -150,6 +158,7 @@ void WindowScaler::CacheOriginalPosition(HWND hwnd) {
 bool WindowScaler::RestoreWindowPosition(HWND hwnd) {
     auto it = s_originalPositions.find(hwnd);
     if (it == s_originalPositions.end() || !IsWindow(hwnd)) return false;
+
     const OriginalWindowState& state = it->second;
 
     if (state.isMaximized) {
@@ -177,6 +186,7 @@ void WindowScaler::RestoreAllCapturedWindows() {
 
 std::string WindowScaler::ResolveAppPath(const std::string& processName) {
     if (processName.empty()) return "";
+
     if (processName.find("\\") != std::string::npos || processName.find("/") != std::string::npos) {
         return processName;
     }
@@ -194,4 +204,27 @@ std::string WindowScaler::ResolveAppPath(const std::string& processName) {
     }
 
     return processName;
+}
+
+bool WindowScaler::LaunchAndSnapApp(const std::string& processName, const SelectedBox& box) {
+    std::string fullPath = ResolveAppPath(processName);
+    std::cout << "[LAUNCHER] Attempting to launch: " << fullPath << std::endl;
+
+    HINSTANCE hInst = ShellExecuteA(NULL, "open", fullPath.c_str(), NULL, NULL, SW_SHOWNORMAL);
+    if ((INT_PTR)hInst <= 32) {
+        std::cerr << "[LAUNCHER ERROR] ShellExecute failed for: " << fullPath << std::endl;
+        return false;
+    }
+
+    Sleep(1500);
+
+    auto activeWindows = GetActiveWindows();
+    for (const auto& win : activeWindows) {
+        if (win.processName == processName || fullPath.find(win.processName) != std::string::npos) {
+            std::cout << "[LAUNCHER] Found spawned window HWND " << win.hwnd << ", snapping..." << std::endl;
+            return SnapToBox(win.hwnd, box);
+        }
+    }
+
+    return false;
 }

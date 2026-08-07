@@ -15,6 +15,9 @@ public:
     // Process Windows message loop
     static void RunMessageLoop();
 
+    // Restore and focus the dashboard after a full-screen native editor closes.
+    static void RestoreDashboard();
+
     // Send JSON payload downstream from C++ to JavaScript
     static void SendMessageToUI(const std::string& jsonPayload);
 

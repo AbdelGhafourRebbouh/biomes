@@ -14,6 +14,8 @@ POINT GridOverlay::s_dragStart = { 0, 0 };
 POINT GridOverlay::s_dragCurrent = { 0, 0 };
 HWND GridOverlay::s_activeDragHwnd = NULL;
 std::vector<SelectedBox> GridOverlay::s_savedBoxes;
+std::function<void(const std::vector<SelectedBox>&)> GridOverlay::s_onCompleted;
+std::function<void()> GridOverlay::s_onCancelled;
 
 BOOL CALLBACK GridOverlay::MonitorEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData) {
     MonitorInfoData info;
@@ -32,15 +34,8 @@ bool GridOverlay::ShowOverlay(int rows, int cols, const OverlayTheme& theme) {
     s_savedBoxes.clear();
     s_monitors.clear();
 
-    // 1. Drop all active windows to reveal clean desktop wallpaper
-    keybd_event(VK_LWIN, 0, 0, 0);
-    keybd_event('D', 0, 0, 0);
-    keybd_event('D', 0, KEYEVENTF_KEYUP, 0);
-    keybd_event(VK_LWIN, 0, KEYEVENTF_KEYUP, 0);
-
-    Sleep(150);
-
-    // 2. Enumerate every active connected display
+    // Enumerate every active connected display. Do not synthesize Win+D here:
+    // doing so can hide the dashboard before an overlay has been created.
     EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, 0);
 
     HINSTANCE hInstance = GetModuleHandle(NULL);
@@ -55,7 +50,8 @@ bool GridOverlay::ShowOverlay(int rows, int cols, const OverlayTheme& theme) {
 
     RegisterClassA(&wc);
 
-    // 3. Create clean overlay window for EVERY detected monitor
+    bool createdOverlay = false;
+    // Create clean overlay window for EVERY detected monitor
     for (auto& mon : s_monitors) {
         int w = mon.rect.right - mon.rect.left;
         int h = mon.rect.bottom - mon.rect.top;
@@ -72,12 +68,16 @@ bool GridOverlay::ShowOverlay(int rows, int cols, const OverlayTheme& theme) {
         if (mon.hwndOverlay) {
             SetLayeredWindowAttributes(mon.hwndOverlay, 0, s_theme.bgAlpha, LWA_ALPHA);
             SetWindowLongPtr(mon.hwndOverlay, GWLP_USERDATA, mon.index);
-            ShowWindow(mon.hwndOverlay, SW_SHOW);
-            UpdateWindow(mon.hwndOverlay);
+            SetWindowPos(mon.hwndOverlay, HWND_TOPMOST, mon.rect.left, mon.rect.top, w, h,
+                         SWP_SHOWWINDOW | SWP_NOACTIVATE);
+            createdOverlay = true;
+        } else {
+            std::cerr << "[GRID OVERLAY] CreateWindowEx failed for monitor " << mon.index
+                      << " (error " << GetLastError() << ")" << std::endl;
         }
     }
 
-    return !s_monitors.empty();
+    return createdOverlay;
 }
 
 void GridOverlay::HideOverlay() {
@@ -88,6 +88,14 @@ void GridOverlay::HideOverlay() {
         }
     }
     s_monitors.clear();
+}
+
+void GridOverlay::SetCompletedCallback(std::function<void(const std::vector<SelectedBox>&)> callback) {
+    s_onCompleted = std::move(callback);
+}
+
+void GridOverlay::SetCancelledCallback(std::function<void()> callback) {
+    s_onCancelled = std::move(callback);
 }
 
 void GridOverlay::RemoveOverlappingBoxes(int monitorIdx, const RECT& newRect) {
@@ -308,9 +316,18 @@ LRESULT CALLBACK GridOverlay::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                     s_savedBoxes.pop_back();
                     for (auto& mon : s_monitors) InvalidateRect(mon.hwndOverlay, NULL, FALSE);
                 }
+            } else if (wParam == VK_RETURN) {
+                const std::vector<SelectedBox> completedBoxes = s_savedBoxes;
+                HideOverlay();
+                if (s_onCompleted) {
+                    s_onCompleted(completedBoxes);
+                }
             } else if (wParam == VK_ESCAPE) {
                 HideOverlay();
-                PostQuitMessage(0);
+                s_savedBoxes.clear();
+                if (s_onCancelled) {
+                    s_onCancelled();
+                }
             }
             return 0;
 

@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <vector>
 #include <string>
+#include <functional>
 
 // Relative / Normalized Box Structure (Resolution & Monitor Agnostic)
 struct SelectedBox {
@@ -49,6 +50,8 @@ public:
     static bool ShowOverlay(int rows = 8, int cols = 14, const OverlayTheme& theme = OverlayTheme());
     static void HideOverlay();
     static std::vector<SelectedBox> GetSavedBoxes() { return s_savedBoxes; }
+    static void SetCompletedCallback(std::function<void(const std::vector<SelectedBox>&)> callback);
+    static void SetCancelledCallback(std::function<void()> callback);
 
 private:
     static BOOL CALLBACK MonitorEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData);
@@ -66,4 +69,6 @@ private:
     static POINT s_dragCurrent;
     static HWND s_activeDragHwnd;
     static std::vector<SelectedBox> s_savedBoxes;
+    static std::function<void(const std::vector<SelectedBox>&)> s_onCompleted;
+    static std::function<void()> s_onCancelled;
 };

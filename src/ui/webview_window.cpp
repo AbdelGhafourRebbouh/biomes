@@ -127,7 +127,7 @@ TInterface* CreateCallbackRaw(F&& func) {
 }
 
 // ============================================================================
-// Static Member Definitions (Matches include/ui/webview_window.hpp)
+// Static Member Definitions
 // ============================================================================
 
 HWND WebViewWindow::s_hwnd = nullptr;
@@ -174,7 +174,6 @@ void WebViewWindow::InitWebView(const std::string& startUrl) {
     auto pfnCreateEnvironment = reinterpret_cast<PFN_CreateCoreWebView2EnvironmentWithOptions>(
         GetProcAddress(hLoader, "CreateCoreWebView2EnvironmentWithOptions")
     );
-
     if (!pfnCreateEnvironment) {
         std::cerr << "[WEBVIEW ERROR] Could not locate CreateCoreWebView2EnvironmentWithOptions inside DLL." << std::endl;
         return;
@@ -228,13 +227,15 @@ void WebViewWindow::InitWebView(const std::string& startUrl) {
         }
     );
 
-    // CALL THE DYNAMIC POINTER (Fixes linker error)
     pfnCreateEnvironment(nullptr, userDataFolder.c_str(), nullptr, envHandler);
 }
 
 void WebViewWindow::SendMessageToUI(const std::string& jsonPayload) {
     if (s_webview) {
-        std::wstring wPayload(jsonPayload.begin(), jsonPayload.end());
+        int size_needed = MultiByteToWideChar(CP_UTF8, 0, jsonPayload.c_str(), (int)jsonPayload.size(), NULL, 0);
+        std::wstring wPayload(size_needed, 0);
+        MultiByteToWideChar(CP_UTF8, 0, jsonPayload.c_str(), (int)jsonPayload.size(), &wPayload[0], size_needed);
+
         s_webview->PostWebMessageAsJson(wPayload.c_str());
         std::cout << "[IPC C++ -> JS] Sent payload: " << jsonPayload << std::endl;
     }
@@ -270,4 +271,10 @@ LRESULT CALLBACK WebViewWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
             return DefWindowProc(hwnd, uMsg, wParam, lParam);
     }
     return 0;
+}
+
+void WebViewWindow::RestoreDashboard() {
+    if (!s_hwnd || !IsWindow(s_hwnd)) return;
+    ShowWindow(s_hwnd, SW_RESTORE);
+    SetForegroundWindow(s_hwnd);
 }

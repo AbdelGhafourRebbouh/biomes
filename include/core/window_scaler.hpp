@@ -1,15 +1,18 @@
 #pragma once
 #ifndef WINDOW_SCALER_HPP
+#define WINDOW_SCALER_HPP
+
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#define WINDOW_SCALER_HPP
 
 #include <windows.h>
 #include <string>
 #include <vector>
 #include <unordered_map>
-#include "../ui/grid_overlay.hpp"
+
+// Forward declaration to prevent circular header inclusions
+struct SelectedBox;
 
 struct WindowInfo {
     HWND hwnd;
@@ -18,7 +21,6 @@ struct WindowInfo {
     std::string processName;
 };
 
-// Window state storage for restoration
 struct OriginalWindowState {
     RECT rect;
     bool isMaximized;
@@ -32,12 +34,10 @@ public:
     static std::vector<WindowInfo> GetActiveWindows();
     static void ShowDesktop();
 
-    // NEW: Restoration Memory
     static void CacheOriginalPosition(HWND hwnd);
     static bool RestoreWindowPosition(HWND hwnd);
     static void RestoreAllCapturedWindows();
 
-    // NEW: Registry Path Resolver
     static std::string ResolveAppPath(const std::string& processName);
     static bool LaunchAndSnapApp(const std::string& processName, const SelectedBox& box);
 
