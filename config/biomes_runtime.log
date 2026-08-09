@@ -57,3 +57,23 @@
 [APP] Action extracted: CREATE_NEW_BIOME
 [APP] CREATE_NEW_BIOME requested - pressing Win+D
 [APP] Launching grid overlay
+[APP] Startup begin
+[APP] Loading dashboard from file:///C:/Users/Abdelghafour/source/repos/biomes/build/Release/index.html
+[APP] Initializing WebView2 window
+[APP] IPC raw message: {"action":"GET_SAVED_BIOMES"}
+[APP] JSON parsed successfully
+[APP] Action extracted: GET_SAVED_BIOMES
+[APP] IPC raw message: {"action":"CREATE_NEW_BIOME"}
+[APP] JSON parsed successfully
+[APP] Action extracted: CREATE_NEW_BIOME
+[APP] CREATE_NEW_BIOME requested - pressing Win+D
+[APP] Launching grid overlay
+[OVERLAY] ShowOverlay begin
+[OVERLAY] Detected 2 monitors
+[OVERLAY] Enter pressed; completing layout
+[APP] IPC raw message: {"action":"GET_ACTIVE_WINDOWS"}
+[APP] JSON parsed successfully
+[APP] Action extracted: GET_ACTIVE_WINDOWS
+[APP] IPC raw message: {"action":"SAVE_BIOME","name":"jkljkl","hotkey":"","boxes":[{"assignedApp":"Biomes.exe","endCol":6,"endRow":4,"id":1,"monitorIndex":1,"relHeight":0.5,"relWidth":0.4281249940395355,"relX":0,"relY":0,"startCol":0,"startRow":0},{"assignedApp":"Code.exe","endCol":10,"endRow":4,"id":2,"monitorIndex":1,"relHeight":0.5,"relWidth":0.28593748807907104,"relX":0.4281249940395355,"relY":0,"startCol":6,"startRow":0},{"assignedApp":"Wispr Flow.exe","endCol":6,"endRow":8,"id":3,"monitorIndex":1,"relHeight":0.5,"relWidth":0.4281249940395355,"relX":0,"relY":0.5,"startCol":0,"startRow":4}]}
+[APP] JSON parsed successfully
+[APP] Action extracted: SAVE_BIOME
