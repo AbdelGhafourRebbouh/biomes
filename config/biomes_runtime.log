@@ -1,0 +1,59 @@
+[APP] Startup begin
+[APP] Loading dashboard from file:///C:/Users/Abdelghafour/source/repos/biomes/build/Release/index.html
+[APP] Initializing WebView2 window
+[APP] IPC raw message: {"action":"GET_SAVED_BIOMES"}
+[APP] JSON parsed successfully
+[APP] Action extracted: GET_SAVED_BIOMES
+[APP] IPC raw message: {"action":"DELETE_BIOME","id":"biome-234671281"}
+[APP] JSON parsed successfully
+[APP] Action extracted: DELETE_BIOME
+[APP] IPC raw message: {"action":"CREATE_NEW_BIOME"}
+[APP] JSON parsed successfully
+[APP] Action extracted: CREATE_NEW_BIOME
+[APP] CREATE_NEW_BIOME requested - pressing Win+D
+[APP] Launching grid overlay
+[OVERLAY] ShowOverlay begin
+[OVERLAY] Detected 2 monitors
+[OVERLAY] Enter pressed; completing layout
+[APP] IPC raw message: {"action":"GET_ACTIVE_WINDOWS"}
+[APP] JSON parsed successfully
+[APP] Action extracted: GET_ACTIVE_WINDOWS
+[APP] Startup begin
+[APP] Loading dashboard from file:///C:/Users/Abdelghafour/source/repos/biomes/build/Release/index.html
+[APP] Initializing WebView2 window
+[APP] IPC raw message: {"action":"GET_SAVED_BIOMES"}
+[APP] JSON parsed successfully
+[APP] Action extracted: GET_SAVED_BIOMES
+[APP] IPC raw message: {"action":"ACTIVATE_BIOME","id":"biome-234671281"}
+[APP] JSON parsed successfully
+[APP] Action extracted: ACTIVATE_BIOME
+[APP] IPC raw message: {"action":"ACTIVATE_BIOME","id":"biome-234671281"}
+[APP] JSON parsed successfully
+[APP] Action extracted: ACTIVATE_BIOME
+[APP] Startup begin
+[APP] Loading dashboard from file:///C:/Users/Abdelghafour/source/repos/biomes/build/Release/index.html
+[APP] Initializing WebView2 window
+[APP] IPC raw message: {"action":"GET_SAVED_BIOMES"}
+[APP] JSON parsed successfully
+[APP] Action extracted: GET_SAVED_BIOMES
+[APP] IPC raw message: {"action":"CREATE_NEW_BIOME"}
+[APP] JSON parsed successfully
+[APP] Action extracted: CREATE_NEW_BIOME
+[APP] CREATE_NEW_BIOME requested - pressing Win+D
+[APP] Launching grid overlay
+[APP] IPC raw message: {"action":"CREATE_NEW_BIOME"}
+[APP] JSON parsed successfully
+[APP] Action extracted: CREATE_NEW_BIOME
+[APP] CREATE_NEW_BIOME requested - pressing Win+D
+[APP] Launching grid overlay
+[APP] Startup begin
+[APP] Loading dashboard from file:///C:/Users/Abdelghafour/source/repos/biomes/build/Release/index.html
+[APP] Initializing WebView2 window
+[APP] IPC raw message: {"action":"GET_SAVED_BIOMES"}
+[APP] JSON parsed successfully
+[APP] Action extracted: GET_SAVED_BIOMES
+[APP] IPC raw message: {"action":"CREATE_NEW_BIOME"}
+[APP] JSON parsed successfully
+[APP] Action extracted: CREATE_NEW_BIOME
+[APP] CREATE_NEW_BIOME requested - pressing Win+D
+[APP] Launching grid overlay

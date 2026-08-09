@@ -334,7 +334,9 @@
         // Send IPC command to C++
         function sendIPC(action, payload = {}) {
             if (window.chrome && window.chrome.webview) {
-                window.chrome.webview.postMessage(JSON.stringify({ action, ...payload }));
+                const message = { action, ...payload };
+                console.log('[IPC SEND]', message);
+                window.chrome.webview.postMessage(message);
             }
         }
 

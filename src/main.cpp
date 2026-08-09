@@ -2,8 +2,9 @@
 #include <windows.h>
 #include <iostream>
 #include <string>
-#include <filesystem>
 #include <sstream>
+#include <fstream>
+#include <filesystem>
 #include "../include/external/nlohmann/json.hpp"
 
 #include "../include/ui/webview_window.hpp"
@@ -14,6 +15,20 @@
 #include "../include/core/biome_manager.hpp"
 
 using json = nlohmann::json;
+
+void WriteRuntimeLog(const std::string& message) {
+    CreateDirectoryA("config", nullptr);
+    std::ofstream log("config/biomes_runtime.log", std::ios::app);
+    if (log.is_open()) {
+        log << message << std::endl;
+    }
+}
+
+std::string BuildFileUrl(const std::filesystem::path& path) {
+    std::string raw = path.string();
+    std::replace(raw.begin(), raw.end(), '\\', '/');
+    return "file:///" + raw;
+}
 
 // Helper to sanitize strings for IPC JSON transmission
 std::string EscapeJsonString(const std::string& input) {
@@ -50,6 +65,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     freopen_s((FILE**)stderr, "CONOUT$", "w", stderr);
 
     std::cout << "=== Biomes Workspace Engine Active ===" << std::endl;
+    WriteRuntimeLog("[APP] Startup begin");
 
     GridOverlay::SetCompletedCallback([](const std::vector<SelectedBox>& boxes) {
         WebViewWindow::RestoreDashboard();
@@ -66,27 +82,59 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     // Handle all incoming IPC messages from the Home Dashboard (index.html)
     WebViewWindow::SetMessageReceivedCallback([](const std::string& message) {
-        std::cout << "[IPC RECEIVED]: " << message << std::endl;
-        json request;
         try {
-            request = json::parse(message);
-        } catch (const json::exception&) {
-            WebViewWindow::SendMessageToUI(R"({"action":"STATUS","payload":"Invalid request."})");
-            return;
-        }
-        const std::string action = request.value("action", "");
-
-        // 1. Trigger Multi-Monitor Grid Overlay on Wallpaper (Win + D)
-        if (action == "CREATE_NEW_BIOME" || action == "SHOW_DESKTOP") {
-            std::cout << "[ENGINE] Minimizing windows to desktop & launching Grid Overlay..." << std::endl;
-            // Calls ShowOverlay using your existing GridOverlay method
-            if (!GridOverlay::ShowOverlay()) {
-                WebViewWindow::RestoreDashboard();
-                WebViewWindow::SendMessageToUI(R"({"action":"STATUS","payload":"Could not open the grid overlay."})");
+            std::cout << "[IPC RECEIVED RAW]: " << message << std::endl;
+            WriteRuntimeLog("[APP] IPC raw message: " + message);
+            
+            json request = json::parse(message);
+            WriteRuntimeLog("[APP] JSON parsed successfully");
+            
+            if (!request.is_object()) {
+                WriteRuntimeLog("[APP] ERROR: parsed JSON is not an object");
+                WebViewWindow::SendMessageToUI(R"({"action":"STATUS","payload":"Invalid request format."})");
+                return;
             }
-        }
-        // 2. Query running taskbar windows for drag-and-drop tile matching
-        else if (action == "GET_ACTIVE_WINDOWS") {
+            
+            std::string action = request.value("action", "");
+            WriteRuntimeLog("[APP] Action extracted: " + action);
+
+            // 1. Trigger Multi-Monitor Grid Overlay on Wallpaper (Win + D)
+            if (action == "CREATE_NEW_BIOME" || action == "SHOW_DESKTOP") {
+                std::cout << "[ENGINE] Pressing Windows + D to minimize all windows..." << std::endl;
+                WriteRuntimeLog("[APP] CREATE_NEW_BIOME requested - pressing Win+D");
+                
+                // Simulate Windows + D to show desktop
+                INPUT inputs[4] = {};
+                inputs[0].type = INPUT_KEYBOARD;
+                inputs[0].ki.wVk = VK_LWIN;
+                inputs[0].ki.dwFlags = 0;
+                
+                inputs[1].type = INPUT_KEYBOARD;
+                inputs[1].ki.wVk = 'D';
+                inputs[1].ki.dwFlags = 0;
+                
+                inputs[2].type = INPUT_KEYBOARD;
+                inputs[2].ki.wVk = 'D';
+                inputs[2].ki.dwFlags = KEYEVENTF_KEYUP;
+                
+                inputs[3].type = INPUT_KEYBOARD;
+                inputs[3].ki.wVk = VK_LWIN;
+                inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
+                
+                SendInput(4, inputs, sizeof(INPUT));
+                Sleep(500); // Wait for windows to minimize
+                
+                std::cout << "[ENGINE] Launching Grid Overlay..." << std::endl;
+                WriteRuntimeLog("[APP] Launching grid overlay");
+                
+                if (!GridOverlay::ShowOverlay()) {
+                    WriteRuntimeLog("[APP] Grid overlay could not be opened");
+                    WebViewWindow::RestoreDashboard();
+                    WebViewWindow::SendMessageToUI(R"({"action":"STATUS","payload":"Could not open the grid overlay."})");
+                }
+            }
+            // 2. Query running taskbar windows for drag-and-drop tile matching
+            else if (action == "GET_ACTIVE_WINDOWS") {
             auto windows = WindowScaler::GetActiveWindows();
             
             std::ostringstream json;
@@ -146,6 +194,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             SendSavedBiomesToUi();
             WebViewWindow::SendMessageToUI(R"({"action":"BIOME_SAVED"})");
         }
+        } catch (const std::exception& e) {
+            WriteRuntimeLog("[APP] Exception in message callback: " + std::string(e.what()));
+            std::cerr << "[ERROR] Exception: " << e.what() << std::endl;
+        } catch (...) {
+            WriteRuntimeLog("[APP] Unknown exception in message callback");
+            std::cerr << "[ERROR] Unknown exception" << std::endl;
+        }
     });
 
     // Locate index.html alongside the executable
@@ -153,10 +208,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     GetModuleFileNameA(NULL, buffer, MAX_PATH);
     std::filesystem::path exePath(buffer);
     std::filesystem::path htmlPath = exePath.parent_path() / "index.html";
-    std::string startUrl = "file:///" + htmlPath.string();
+    std::string startUrl = BuildFileUrl(htmlPath);
+    WriteRuntimeLog("[APP] Loading dashboard from " + startUrl);
 
+    WriteRuntimeLog("[APP] Initializing WebView2 window");
     // Launch WebView2 Win32 Container
     if (!WebViewWindow::Initialize(hInstance, nCmdShow, startUrl)) {
+        WriteRuntimeLog("[APP] WebView2 initialization failed");
         std::cerr << "[ERROR] Failed to initialize WebView2 window." << std::endl;
         return -1;
     }

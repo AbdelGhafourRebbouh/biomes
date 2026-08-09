@@ -3,6 +3,8 @@
 #define WEBVIEW_WINDOW_HPP
 
 #include <windows.h>
+#include <unknwn.h>
+#include <objbase.h>
 #include <string>
 #include <functional>
 #include <WebView2.h>

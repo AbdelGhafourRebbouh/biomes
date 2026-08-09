@@ -1,0 +1,643 @@
+﻿#define NOMINMAX
+#include "../../include/ui/grid_overlay.hpp"
+#include <iostream>
+#include <algorithm>
+#include <fstream>
+#include <windows.h>
+
+std::vector<MonitorInfoData> GridOverlay::s_monitors;
+int GridOverlay::s_rows = 8;
+int GridOverlay::s_cols = 14;
+OverlayTheme GridOverlay::s_theme;
+
+bool GridOverlay::s_isDragging = false;
+POINT GridOverlay::s_dragStart = { 0, 0 };
+POINT GridOverlay::s_dragCurrent = { 0, 0 };
+HWND GridOverlay::s_activeDragHwnd = NULL;
+int GridOverlay::s_hoveredBoxIndex = -1;
+HWND GridOverlay::s_draggedWindowHwnd = NULL;
+HWND GridOverlay::s_hoveredWindowHwnd = NULL;
+HWND GridOverlay::s_lastActiveWindow = NULL;
+HWINEVENTHOOK GridOverlay::s_hWinEventHook = NULL;
+std::string GridOverlay::s_draggedWindowName = "";
+std::vector<SelectedBox> GridOverlay::s_savedBoxes;
+std::vector<std::vector<SelectedBox>> GridOverlay::s_splitHistory;
+std::function<void(const std::vector<SelectedBox>&)> GridOverlay::s_onCompleted;
+std::function<void()> GridOverlay::s_onCancelled;
+
+void CALLBACK GridOverlay::WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime) {
+    if (idObject != OBJID_WINDOW || idChild != CHILDID_SELF) return;
+
+    if (event == EVENT_SYSTEM_MOVESIZESTART) {
+        s_draggedWindowHwnd = hwnd;
+        for (auto& mon : s_monitors) InvalidateRect(mon.hwndOverlay, NULL, FALSE);
+    }
+    else if (event == EVENT_OBJECT_LOCATIONCHANGE) {
+        if (s_draggedWindowHwnd == hwnd) {
+            // Refresh overlays to update hover highlights
+            for (auto& mon : s_monitors) InvalidateRect(mon.hwndOverlay, NULL, FALSE);
+        }
+    }
+    else if (event == EVENT_SYSTEM_MOVESIZEEND) {
+
+        if (s_draggedWindowHwnd == hwnd) {
+            POINT pt;
+            GetCursorPos(&pt);
+            
+            bool snapped = false;
+            for (auto& box : s_savedBoxes) {
+                // Convert relative box to screen pixels
+                const auto& mon = s_monitors[box.monitorIndex];
+                int monWidth = mon.rect.right - mon.rect.left;
+                int monHeight = mon.rect.bottom - mon.rect.top;
+                
+                RECT screenBox;
+                screenBox.left = mon.rect.left + static_cast<int>(box.relX * monWidth);
+                screenBox.top = mon.rect.top + static_cast<int>(box.relY * monHeight);
+                screenBox.right = screenBox.left + static_cast<int>(box.relWidth * monWidth);
+                screenBox.bottom = screenBox.top + static_cast<int>(box.relHeight * monHeight);
+
+                if (PtInRect(&screenBox, pt)) {
+                    // Snap window!
+                    SetWindowPos(hwnd, HWND_TOP, screenBox.left, screenBox.top, 
+                                 screenBox.right - screenBox.left, screenBox.bottom - screenBox.top, 
+                                 SWP_SHOWWINDOW);
+                    
+                    // Get process name
+                    DWORD processId;
+                    GetWindowThreadProcessId(hwnd, &processId);
+                    HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
+                    if (hProcess) {
+                        char path[MAX_PATH];
+                        DWORD size = MAX_PATH;
+                        if (QueryFullProcessImageNameA(hProcess, 0, path, &size)) {
+                            box.assignedApp = std::string(path);
+                        }
+                        CloseHandle(hProcess);
+                    }
+                    snapped = true;
+                    break;
+                }
+            }
+            
+            s_draggedWindowHwnd = NULL;
+            s_hoveredBoxIndex = -1;
+            
+            for (auto& mon : s_monitors) InvalidateRect(mon.hwndOverlay, NULL, FALSE);
+        }
+    }
+}
+
+
+void WriteOverlayLog(const std::string& message) {
+    CreateDirectoryA("config", nullptr);
+    std::ofstream log("config/biomes_runtime.log", std::ios::app);
+    if (log.is_open()) {
+        log << message << std::endl;
+    }
+}
+
+void GridOverlay::PopulateBoxFromRect(SelectedBox& box, int monitorIndex, const RECT& rect, int id, const RECT& monitorRect) {
+    box.id = id;
+    box.monitorIndex = monitorIndex;
+    box.pixelRect = rect;
+
+    const int monitorWidth = monitorRect.right - monitorRect.left;
+    const int monitorHeight = monitorRect.bottom - monitorRect.top;
+    if (monitorWidth <= 0 || monitorHeight <= 0) {
+        box.relX = 0.0f;
+        box.relY = 0.0f;
+        box.relWidth = 0.0f;
+        box.relHeight = 0.0f;
+        return;
+    }
+
+    box.relX = static_cast<float>(rect.left - monitorRect.left) / monitorWidth;
+    box.relY = static_cast<float>(rect.top - monitorRect.top) / monitorHeight;
+    box.relWidth = static_cast<float>(rect.right - rect.left) / monitorWidth;
+    box.relHeight = static_cast<float>(rect.bottom - rect.top) / monitorHeight;
+}
+
+void GridOverlay::PushCurrentBoxesToHistory() {
+    s_splitHistory.push_back(GetSavedBoxes());
+}
+
+void GridOverlay::RestoreLastSplitState() {
+    if (s_splitHistory.empty()) {
+        return;
+    }
+
+    s_savedBoxes = s_splitHistory.back();
+    s_splitHistory.pop_back();
+}
+
+BOOL CALLBACK GridOverlay::MonitorEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData) {
+    MonitorInfoData info;
+    info.index = static_cast<int>(s_monitors.size());
+    info.hMonitor = hMonitor;
+    info.rect = *lprcMonitor;
+    info.hwndOverlay = NULL;
+    s_monitors.push_back(info);
+    return TRUE;
+}
+
+std::vector<RECT> GridOverlay::SplitRect(const RECT& rect, SplitDirection direction, int splitPercent) {
+    std::vector<RECT> parts;
+    parts.reserve(2);
+
+    const int width = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+    const int safePercent = std::max(10, std::min(90, splitPercent));
+
+    if (direction == SplitDirection::Vertical) {
+        const int splitX = rect.left + (width * safePercent / 100);
+        RECT first = rect;
+        RECT second = rect;
+        first.right = splitX;
+        second.left = splitX;
+        parts.push_back(first);
+        parts.push_back(second);
+    } else {
+        const int splitY = rect.top + (height * safePercent / 100);
+        RECT first = rect;
+        RECT second = rect;
+        first.bottom = splitY;
+        second.top = splitY;
+        parts.push_back(first);
+        parts.push_back(second);
+    }
+
+    return parts;
+}
+
+bool GridOverlay::ShowOverlay(int rows, int cols, const OverlayTheme& theme) {
+    s_rows = rows;
+    s_cols = cols;
+    s_theme = theme;
+    s_savedBoxes.clear();
+    s_splitHistory.clear();
+    s_monitors.clear();
+
+    // Enumerate every active connected display. Do not synthesize Win+D here:
+    // doing so can hide the dashboard before an overlay has been created.
+    WriteOverlayLog("[OVERLAY] ShowOverlay begin");
+    EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, 0);
+    WriteOverlayLog("[OVERLAY] Detected " + std::to_string(s_monitors.size()) + " monitors");
+
+    HINSTANCE hInstance = GetModuleHandle(NULL);
+    const char CLASS_NAME[] = "BiomesPerMonitorGridOverlay";
+
+    WNDCLASSA wc = {};
+    wc.lpfnWndProc = WindowProc;
+    wc.hInstance = hInstance;
+    wc.lpszClassName = CLASS_NAME;
+    wc.hCursor = LoadCursor(NULL, IDC_CROSS);
+    wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+
+    if (!RegisterClassA(&wc)) {
+        WriteOverlayLog("[OVERLAY] RegisterClassA failed with error " + std::to_string(GetLastError()));
+    }
+
+    bool createdOverlay = false;
+
+        // Set up window movement hook
+    s_hWinEventHook = SetWinEventHook(
+        EVENT_SYSTEM_MOVESIZESTART, EVENT_SYSTEM_MOVESIZEEND,
+        NULL, WinEventProc, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS
+    );
+    
+    // Add location change hook for hover feedback during drag
+    // We'll reuse the same WinEventProc
+    SetWinEventHook(
+        EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE,
+        NULL, WinEventProc, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS
+    );
+
+
+    // Create clean overlay window for EVERY detected monitor
+
+    for (auto& mon : s_monitors) {
+        int w = mon.rect.right - mon.rect.left;
+        int h = mon.rect.bottom - mon.rect.top;
+
+        mon.hwndOverlay = CreateWindowExA(
+            WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW,
+            CLASS_NAME,
+            "Biomes Overlay",
+            WS_POPUP | WS_VISIBLE,
+            mon.rect.left, mon.rect.top, w, h,
+            NULL, NULL, hInstance, NULL
+        );
+
+        if (mon.hwndOverlay) {
+            SetLayeredWindowAttributes(mon.hwndOverlay, 0, s_theme.bgAlpha, LWA_ALPHA);
+            SetWindowLongPtr(mon.hwndOverlay, GWLP_USERDATA, mon.index);
+            SetWindowPos(mon.hwndOverlay, HWND_TOPMOST, mon.rect.left, mon.rect.top, w, h,
+                         SWP_SHOWWINDOW | SWP_NOACTIVATE);
+            
+            // Accept drag-drop from taskbar
+            DragAcceptFiles(mon.hwndOverlay, TRUE);
+            
+            createdOverlay = true;
+        } else {
+            WriteOverlayLog("[OVERLAY] CreateWindowEx failed for monitor " + std::to_string(mon.index) + " with error " + std::to_string(GetLastError()));
+            std::cerr << "[GRID OVERLAY] CreateWindowEx failed for monitor " << mon.index
+                      << " (error " << GetLastError() << ")" << std::endl;
+        }
+    }
+
+    return createdOverlay;
+}
+
+void GridOverlay::HideOverlay() {
+    if (s_hWinEventHook) {
+        UnhookWinEvent(s_hWinEventHook);
+        s_hWinEventHook = NULL;
+    }
+    for (auto& mon : s_monitors) {
+
+        if (mon.hwndOverlay) {
+            DestroyWindow(mon.hwndOverlay);
+            mon.hwndOverlay = NULL;
+        }
+    }
+    s_monitors.clear();
+}
+
+void GridOverlay::SetCompletedCallback(std::function<void(const std::vector<SelectedBox>&)> callback) {
+    s_onCompleted = std::move(callback);
+}
+
+void GridOverlay::SetCancelledCallback(std::function<void()> callback) {
+    s_onCancelled = std::move(callback);
+}
+
+void GridOverlay::RemoveOverlappingBoxes(int monitorIdx, const RECT& newRect) {
+    auto it = s_savedBoxes.begin();
+    while (it != s_savedBoxes.end()) {
+        if (it->monitorIndex == monitorIdx) {
+            RECT dummy;
+            if (IntersectRect(&dummy, &it->pixelRect, &newRect)) {
+                it = s_savedBoxes.erase(it);
+                continue;
+            }
+        }
+        ++it;
+    }
+}
+
+void GridOverlay::DrawGrid(HDC hdc, HWND hwnd, int monitorIdx) {
+    RECT clientRect;
+    GetClientRect(hwnd, &clientRect);
+    int width = clientRect.right;
+    int height = clientRect.bottom;
+
+    float cellWidth = static_cast<float>(width) / s_cols;
+    float cellHeight = static_cast<float>(height) / s_rows;
+
+    // 1. Draw Clean Full-Screen Grid Lines
+    HPEN gridPen = CreatePen(PS_SOLID, s_theme.gridPenWidth, s_theme.gridLineColor);
+    HPEN oldPen = (HPEN)SelectObject(hdc, gridPen);
+
+    for (int i = 1; i < s_cols; ++i) {
+        int x = static_cast<int>(i * cellWidth);
+        MoveToEx(hdc, x, 0, NULL);
+        LineTo(hdc, x, height);
+    }
+    for (int j = 1; j < s_rows; ++j) {
+        int y = static_cast<int>(j * cellHeight);
+        MoveToEx(hdc, 0, y, NULL);
+        LineTo(hdc, width, y);
+    }
+
+        // 2. Draw Saved Boxes on this Monitor with App Assignments
+    HPEN boxPen = CreatePen(PS_SOLID, s_theme.boxPenWidth, s_theme.boxBorderColor);
+    HBRUSH boxBrush = CreateSolidBrush(s_theme.boxFillColor);
+    HBRUSH boxHoverBrush = CreateSolidBrush(s_theme.boxHoverColor);
+    HBRUSH frameBrush = CreateSolidBrush(s_theme.boxBorderColor);
+    HPEN oldPen2 = (HPEN)SelectObject(hdc, boxPen);
+
+    // Check if we are currently dragging an external window and if it's over a box
+    int currentHoverIdx = -1;
+    if (s_draggedWindowHwnd) {
+        POINT pt;
+        GetCursorPos(&pt);
+        const auto& mon = s_monitors[monitorIdx];
+        if (PtInRect(&mon.rect, pt)) {
+            POINT localPt = pt;
+            localPt.x -= mon.rect.left;
+            localPt.y -= mon.rect.top;
+            
+            for (int i = 0; i < (int)s_savedBoxes.size(); ++i) {
+                if (s_savedBoxes[i].monitorIndex == monitorIdx && PtInRect(&s_savedBoxes[i].pixelRect, localPt)) {
+                    currentHoverIdx = i;
+                    break;
+                }
+            }
+        }
+    }
+
+    HFONT hFont = CreateFontA(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, ANSI_CHARSET,
+
+                              OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
+                              DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
+    HFONT boldFont = CreateFontA(16, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, ANSI_CHARSET,
+                                 OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
+                                 DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
+    HFONT oldFont = (HFONT)SelectObject(hdc, boldFont);
+
+    SetTextColor(hdc, s_theme.textColor);
+    SetBkMode(hdc, TRANSPARENT);
+
+    for (int i = 0; i < (int)s_savedBoxes.size(); ++i) {
+        const auto& box = s_savedBoxes[i];
+        if (box.monitorIndex != monitorIdx) continue;
+
+        RECT paddedRect = box.pixelRect;
+        paddedRect.left += s_theme.boxPadding;
+        paddedRect.top += s_theme.boxPadding;
+        paddedRect.right -= s_theme.boxPadding;
+        paddedRect.bottom -= s_theme.boxPadding;
+
+                // Use different brush if this box is hovered
+        HBRUSH activeBrush = (currentHoverIdx == i || s_hoveredBoxIndex == i) ? boxHoverBrush : boxBrush;
+        
+        FillRect(hdc, &paddedRect, activeBrush);
+
+        FrameRect(hdc, &paddedRect, frameBrush);
+
+        // Draw box ID at top
+        SelectObject(hdc, boldFont);
+        std::string idLabel = "#" + std::to_string(box.id);
+        RECT idRect = paddedRect;
+        idRect.bottom = idRect.top + 20;
+        DrawTextA(hdc, idLabel.c_str(), -1, &idRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+        // Draw assigned app name if present
+        if (!box.assignedApp.empty()) {
+            SelectObject(hdc, hFont);
+            
+            // Extract just the exe name from full path
+            std::string displayName = box.assignedApp;
+            size_t lastSlash = displayName.find_last_of("\\/");
+            if (lastSlash != std::string::npos) {
+                displayName = displayName.substr(lastSlash + 1);
+            }
+            
+            RECT appRect = paddedRect;
+            appRect.top += 25;
+            appRect.left += 5;
+            appRect.right -= 5;
+            
+            // Truncate long names
+            if (displayName.length() > 20) {
+                displayName = displayName.substr(0, 17) + "...";
+            }
+            
+            DrawTextA(hdc, displayName.c_str(), -1, &appRect, DT_CENTER | DT_WORD_ELLIPSIS);
+        } else {
+            SelectObject(hdc, hFont);
+            RECT helpRect = paddedRect;
+            helpRect.top += 25;
+            std::string helpText = "Drag app here";
+            DrawTextA(hdc, helpText.c_str(), -1, &helpRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        }
+    }
+
+    SelectObject(hdc, oldPen2);
+    DeleteObject(boxPen);
+    DeleteObject(boxBrush);
+    DeleteObject(boxHoverBrush);
+    DeleteObject(frameBrush);
+    SelectObject(hdc, oldFont);
+    DeleteObject(hFont);
+    DeleteObject(boldFont);
+
+    // 3. Draw Active Dragging Region
+    if (s_isDragging && s_activeDragHwnd == hwnd) {
+        HPEN dragPen = CreatePen(PS_SOLID, s_theme.boxPenWidth, s_theme.boxBorderColor);
+        HBRUSH dragBrush = CreateSolidBrush(s_theme.boxBorderColor);
+        SelectObject(hdc, dragPen);
+
+        RECT dragRect;
+        dragRect.left = std::min(s_dragStart.x, s_dragCurrent.x);
+        dragRect.top = std::min(s_dragStart.y, s_dragCurrent.y);
+        dragRect.right = std::max(s_dragStart.x, s_dragCurrent.x);
+        dragRect.bottom = std::max(s_dragStart.y, s_dragCurrent.y);
+
+        int startCol = static_cast<int>(dragRect.left / cellWidth);
+        int endCol = static_cast<int>(dragRect.right / cellWidth) + 1;
+        int startRow = static_cast<int>(dragRect.top / cellHeight);
+        int endRow = static_cast<int>(dragRect.bottom / cellHeight) + 1;
+
+        RECT snappedRect;
+        snappedRect.left = static_cast<int>(startCol * cellWidth);
+        snappedRect.top = static_cast<int>(startRow * cellHeight);
+        snappedRect.right = static_cast<int>(endCol * cellWidth);
+        snappedRect.bottom = static_cast<int>(endRow * cellHeight);
+
+        FrameRect(hdc, &snappedRect, dragBrush);
+
+        DeleteObject(dragPen);
+        DeleteObject(dragBrush);
+    }
+
+    SelectObject(hdc, oldPen);
+    DeleteObject(gridPen);
+}
+
+LRESULT CALLBACK GridOverlay::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    int monitorIdx = static_cast<int>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+
+    switch (uMsg) {
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hwnd, &ps);
+
+            RECT rect;
+            GetClientRect(hwnd, &rect);
+            HDC memDC = CreateCompatibleDC(hdc);
+            HBITMAP memBitmap = CreateCompatibleBitmap(hdc, rect.right, rect.bottom);
+            HBITMAP oldBitmap = (HBITMAP)SelectObject(memDC, memBitmap);
+
+            HBRUSH bgBrush = CreateSolidBrush(RGB(10, 18, 15));
+            FillRect(memDC, &rect, bgBrush);
+            DeleteObject(bgBrush);
+
+            DrawGrid(memDC, hwnd, monitorIdx);
+
+            BitBlt(hdc, 0, 0, rect.right, rect.bottom, memDC, 0, 0, SRCCOPY);
+
+            SelectObject(memDC, oldBitmap);
+            DeleteObject(memBitmap);
+            DeleteDC(memDC);
+
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+
+        case WM_LBUTTONDOWN:
+            s_isDragging = true;
+            s_activeDragHwnd = hwnd;
+            s_dragStart.x = LOWORD(lParam);
+            s_dragStart.y = HIWORD(lParam);
+            s_dragCurrent = s_dragStart;
+            SetCapture(hwnd);
+            InvalidateRect(hwnd, NULL, FALSE);
+            return 0;
+
+                case WM_MOUSEMOVE:
+                    if (s_isDragging && s_activeDragHwnd == hwnd) {
+                        s_dragCurrent.x = LOWORD(lParam);
+                        s_dragCurrent.y = HIWORD(lParam);
+                        InvalidateRect(hwnd, NULL, FALSE);
+                    }
+                    return 0;
+
+                case WM_NCHITTEST: {
+                    // If Ctrl is held, let clicks pass through to taskbar/apps
+                    if (GetKeyState(VK_CONTROL) & 0x8000) {
+                        return HTTRANSPARENT;
+                    }
+                    return HTCLIENT;
+                }
+
+
+
+        case WM_LBUTTONUP:
+            if (s_isDragging && s_activeDragHwnd == hwnd) {
+                s_isDragging = false;
+                ReleaseCapture();
+
+                RECT clientRect;
+                GetClientRect(hwnd, &clientRect);
+                float width = static_cast<float>(clientRect.right);
+                float height = static_cast<float>(clientRect.bottom);
+                float cellWidth = width / s_cols;
+                float cellHeight = height / s_rows;
+
+                RECT dragRect;
+                dragRect.left = std::min(s_dragStart.x, s_dragCurrent.x);
+                dragRect.top = std::min(s_dragStart.y, s_dragCurrent.y);
+                dragRect.right = std::max(s_dragStart.x, s_dragCurrent.x);
+                dragRect.bottom = std::max(s_dragStart.y, s_dragCurrent.y);
+
+                int startCol = static_cast<int>(dragRect.left / cellWidth);
+                int endCol = static_cast<int>(dragRect.right / cellWidth) + 1;
+                int startRow = static_cast<int>(dragRect.top / cellHeight);
+                int endRow = static_cast<int>(dragRect.bottom / cellHeight) + 1;
+
+                RECT snappedRect;
+                snappedRect.left = static_cast<int>(startCol * cellWidth);
+                snappedRect.top = static_cast<int>(startRow * cellHeight);
+                snappedRect.right = static_cast<int>(endCol * cellWidth);
+                snappedRect.bottom = static_cast<int>(endRow * cellHeight);
+
+                RemoveOverlappingBoxes(monitorIdx, snappedRect);
+
+                SelectedBox newBox;
+                newBox.id = static_cast<int>(s_savedBoxes.size()) + 1;
+                newBox.monitorIndex = monitorIdx;
+                newBox.startCol = startCol;
+                newBox.endCol = endCol;
+                newBox.startRow = startRow;
+                newBox.endRow = endRow;
+                newBox.pixelRect = snappedRect;
+
+                // Calculate Normalized Relative Coordinates (0.0 to 1.0)
+                newBox.relX = static_cast<float>(snappedRect.left) / width;
+                newBox.relY = static_cast<float>(snappedRect.top) / height;
+                newBox.relWidth = static_cast<float>(snappedRect.right - snappedRect.left) / width;
+                newBox.relHeight = static_cast<float>(snappedRect.bottom - snappedRect.top) / height;
+
+                s_savedBoxes.push_back(newBox);
+                InvalidateRect(hwnd, NULL, FALSE);
+            }
+            return 0;
+       
+        case WM_DISPLAYCHANGE: 
+            std::cout << "[GRID OVERLAY] Display change detected! Refreshing overlay screen..." << std::endl;
+            
+            // Re-render this overlay window for the new resolution/display state
+            InvalidateRect(hwnd, NULL, TRUE);
+            return 0;
+        
+    
+        case WM_KEYDOWN:
+            if (wParam == VK_BACK) {
+                if (!s_savedBoxes.empty()) {
+                    s_savedBoxes.pop_back();
+                    for (auto& mon : s_monitors) InvalidateRect(mon.hwndOverlay, NULL, FALSE);
+                }
+            } else if (wParam == VK_RETURN) {
+                WriteOverlayLog("[OVERLAY] Enter pressed; completing layout");
+                const std::vector<SelectedBox> completedBoxes = s_savedBoxes;
+                HideOverlay();
+                if (s_onCompleted) {
+                    s_onCompleted(completedBoxes);
+                }
+            } else if (wParam == VK_ESCAPE) {
+                WriteOverlayLog("[OVERLAY] Escape pressed; canceling layout");
+                HideOverlay();
+                s_savedBoxes.clear();
+                s_splitHistory.clear();
+                if (s_onCancelled) {
+                    s_onCancelled();
+                }
+            }
+            return 0;
+
+        case WM_DROPFILES: {
+            HDROP hDrop = (HDROP)wParam;
+            UINT numFiles = DragQueryFileA(hDrop, 0xFFFFFFFF, NULL, 0);
+            
+            POINT pt;
+            DragQueryPoint(hDrop, &pt);
+            
+            if (numFiles > 0) {
+                char fileName[MAX_PATH];
+                DragQueryFileA(hDrop, 0, fileName, MAX_PATH);
+                
+                WriteOverlayLog("[OVERLAY] File dropped: " + std::string(fileName));
+                
+                // Find which box is at this point
+                RECT clientRect;
+                GetClientRect(hwnd, &clientRect);
+                float width = static_cast<float>(clientRect.right);
+                float height = static_cast<float>(clientRect.bottom);
+                float cellWidth = width / s_cols;
+                float cellHeight = height / s_rows;
+                
+                for (auto& box : s_savedBoxes) {
+                    if (box.monitorIndex == monitorIdx) {
+                        RECT paddedRect = box.pixelRect;
+                        paddedRect.left += s_theme.boxPadding;
+                        paddedRect.top += s_theme.boxPadding;
+                        paddedRect.right -= s_theme.boxPadding;
+                        paddedRect.bottom -= s_theme.boxPadding;
+                        
+                        if (PtInRect(&paddedRect, pt)) {
+                            // Assign this app to the box
+                            box.assignedApp = std::string(fileName);
+                            WriteOverlayLog("[OVERLAY] Assigned '" + box.assignedApp + "' to box " + std::to_string(box.id));
+                            
+                            // Refresh all monitors to show the change
+                            for (auto& mon : s_monitors) {
+                                InvalidateRect(mon.hwndOverlay, NULL, FALSE);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            DragFinish(hDrop);
+            return 0;
+        }
+
+        case WM_DESTROY:
+            return 0;
+            
+    }
+    return DefWindowProc(hwnd, uMsg, wParam, lParam);
+}
