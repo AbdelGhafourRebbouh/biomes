@@ -7,7 +7,7 @@
 #include <objbase.h>
 #include <string>
 #include <functional>
-#include <WebView2.h>
+#include "../external/webview2/WebView2.h"
 
 class WebViewWindow {
 public:

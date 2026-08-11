@@ -5,6 +5,8 @@
 #include <sstream>
 #include <fstream>
 #include <filesystem>
+#include <unordered_set>
+#include <algorithm>
 #include "../include/external/nlohmann/json.hpp"
 
 #include "../include/ui/webview_window.hpp"
@@ -57,6 +59,63 @@ std::filesystem::path GetBiomesConfigPath();
 json SerializeBox(const SelectedBox& box);
 SelectedBox DeserializeBox(const json& value);
 void SendSavedBiomesToUi();
+
+std::string ExecutableName(const std::string& path) {
+    return std::filesystem::path(path).filename().string();
+}
+
+bool IsSameApplication(const WindowInfo& window, const std::string& assignedApp) {
+    const std::string expected = ExecutableName(assignedApp);
+    return !expected.empty() && _stricmp(window.processName.c_str(), expected.c_str()) == 0;
+}
+
+bool ActivateBiome(const std::string& biomeId, std::string& status) {
+    std::vector<BiomeProfile> profiles;
+    if (!JsonManager::LoadBiomesFromFile(GetBiomesConfigPath().string(), profiles)) {
+        status = "Could not read saved Biomes.";
+        return false;
+    }
+
+    const auto profile = std::find_if(profiles.begin(), profiles.end(), [&](const BiomeProfile& item) {
+        return item.id == biomeId;
+    });
+    if (profile == profiles.end()) {
+        status = "The selected Biome no longer exists.";
+        return false;
+    }
+
+    WindowScaler::ShowDesktop();
+    std::vector<WindowInfo> activeWindows = WindowScaler::GetActiveWindows();
+    std::unordered_set<HWND> usedWindows;
+    size_t placed = 0;
+    size_t failed = 0;
+
+    for (const auto& box : profile->layout) {
+        if (box.assignedApp.empty()) continue;
+
+        const auto window = std::find_if(activeWindows.begin(), activeWindows.end(), [&](const WindowInfo& candidate) {
+            return !usedWindows.count(candidate.hwnd) && IsSameApplication(candidate, box.assignedApp);
+        });
+
+        if (window != activeWindows.end()) {
+            if (WindowScaler::SnapToBox(window->hwnd, box)) {
+                usedWindows.insert(window->hwnd);
+                ++placed;
+            } else {
+                ++failed;
+            }
+        } else if (WindowScaler::LaunchAndSnapApp(box.assignedApp, box)) {
+            ++placed;
+            activeWindows = WindowScaler::GetActiveWindows();
+        } else {
+            ++failed;
+        }
+    }
+
+    status = "Biome launched: " + std::to_string(placed) + " app(s) placed";
+    if (failed > 0) status += ", " + std::to_string(failed) + " app(s) could not be placed";
+    return failed == 0;
+}
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     // Attach debugging console window
@@ -193,6 +252,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             }
             SendSavedBiomesToUi();
             WebViewWindow::SendMessageToUI(R"({"action":"BIOME_SAVED"})");
+        }
+        else if (action == "ACTIVATE_BIOME") {
+            const std::string biomeId = request.value("id", "");
+            std::string status;
+            const bool success = ActivateBiome(biomeId, status);
+            WebViewWindow::SendMessageToUI("{\"action\":\"STATUS\",\"payload\":\"" + EscapeJsonString(status) + "\",\"success\":" + (success ? "true" : "false") + "}");
         }
         } catch (const std::exception& e) {
             WriteRuntimeLog("[APP] Exception in message callback: " + std::string(e.what()));

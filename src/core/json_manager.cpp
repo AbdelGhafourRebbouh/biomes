@@ -3,6 +3,8 @@
 #include <fstream>
 #include <iostream>
 #include <set>
+#include <filesystem>
+#include <windows.h>
 
 using json = nlohmann::json;
 
@@ -102,12 +104,28 @@ bool JsonManager::SaveBiomesToFile(const std::string& filePath, const std::vecto
         root["biomes"].push_back(SerializeBiome(profile));
     }
 
-    std::ofstream file(filePath);
+    const std::filesystem::path target(filePath);
+    const std::filesystem::path temporary = target.string() + ".tmp";
+    if (!target.parent_path().empty()) {
+        std::error_code directoryError;
+        std::filesystem::create_directories(target.parent_path(), directoryError);
+        if (directoryError) return false;
+    }
+
+    std::ofstream file(temporary, std::ios::trunc);
     if (!file.is_open()) {
-        std::cerr << "[JSON] Failed to open " << filePath << " for writing." << std::endl;
+        std::cerr << "[JSON] Failed to open " << temporary << " for writing." << std::endl;
         return false;
     }
     file << root.dump(4);
+    file.flush();
+    if (!file.good()) return false;
+    file.close();
+
+    if (!MoveFileExA(temporary.string().c_str(), target.string().c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        std::cerr << "[JSON] Failed to replace " << target << " (Win32 error " << GetLastError() << ")." << std::endl;
+        return false;
+    }
     return true;
 }
 
