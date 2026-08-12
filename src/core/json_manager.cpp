@@ -31,6 +31,10 @@ json SerializeBiome(const BiomeProfile& profile) {
         boxObj["relWidth"] = box.relWidth;
         boxObj["relHeight"] = box.relHeight;
         boxObj["assignedApp"] = box.assignedApp;
+        boxObj["exeName"] = box.exeName;
+        boxObj["titleHint"] = box.titleHint;
+        boxObj["monitorDevice"] = box.monitorDevice;
+        boxObj["aumid"] = box.aumid;
         j["boxes"].push_back(boxObj);
     }
 
@@ -58,6 +62,13 @@ BiomeProfile DeserializeBiome(const json& j) {
             box.relWidth = item.value("relWidth", 0.0f);
             box.relHeight = item.value("relHeight", 0.0f);
             box.assignedApp = item.value("assignedApp", "");
+            box.exeName = item.value("exeName", "");
+            box.titleHint = item.value("titleHint", "");
+            box.monitorDevice = item.value("monitorDevice", "");
+            box.aumid = item.value("aumid", "");
+            if (box.exeName.empty() && !box.assignedApp.empty()) {
+                box.exeName = std::filesystem::path(box.assignedApp).filename().string();
+            }
             profile.layout.push_back(box);
         }
     }
@@ -98,7 +109,7 @@ bool JsonManager::LoadBiomeFromFile(const std::string& filePath, BiomeProfile& o
 
 bool JsonManager::SaveBiomesToFile(const std::string& filePath, const std::vector<BiomeProfile>& profiles) {
     json root;
-    root["version"] = 1;
+    root["version"] = 2;
     root["biomes"] = json::array();
     for (const auto& profile : profiles) {
         root["biomes"].push_back(SerializeBiome(profile));
@@ -171,7 +182,7 @@ std::string JsonManager::LoadBiomesAsJsonString(const std::string& filePath) {
         std::set<std::string> uniqueApps;
         for (const auto& box : profile.layout) {
             if (!box.assignedApp.empty()) {
-                uniqueApps.insert(box.assignedApp);
+                uniqueApps.insert(std::filesystem::path(box.assignedApp).filename().string());
             }
         }
         card["apps"] = uniqueApps;

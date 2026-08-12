@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Biomes - Workspace Dashboard</title>
     <style>
-        /* CSS Tokens - Easy to style for your visual identity */
         :root {
             --bg-base: #0f0f17;
             --bg-surface: #1a1a26;
@@ -22,7 +21,10 @@
         * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
 
         body {
-            background-color: var(--bg-base);
+            background:
+                radial-gradient(1200px 600px at 10% -10%, rgba(137, 180, 250, 0.18), transparent 60%),
+                radial-gradient(900px 500px at 90% 0%, rgba(166, 227, 161, 0.12), transparent 55%),
+                var(--bg-base);
             color: var(--text-main);
             font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
             min-height: 100vh;
@@ -64,28 +66,44 @@
             gap: 8px;
         }
 
-        .btn-create:hover {
-            opacity: 0.9;
-            transform: translateY(-2px);
-        }
+        .btn-create:hover { opacity: 0.9; transform: translateY(-2px); }
+        .btn-create:active { transform: translateY(0); }
 
-        .btn-create:active {
-            transform: translateY(0);
-        }
-
-        /* DASHBOARD GRID */
-        main {
-            padding: 30px;
-            flex: 1;
-        }
+        main { padding: 30px; flex: 1; }
 
         .section-title {
             font-size: 1.1rem;
-            margin-bottom: 20px;
+            margin-bottom: 12px;
             color: var(--text-muted);
             text-transform: uppercase;
             letter-spacing: 1px;
         }
+
+        .flow-hint {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            margin-bottom: 20px;
+            max-width: 720px;
+            line-height: 1.45;
+        }
+
+        .status-toast {
+            position: fixed;
+            right: 20px;
+            bottom: 20px;
+            max-width: 360px;
+            padding: 12px 14px;
+            border-radius: 8px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s;
+            z-index: 20;
+        }
+
+        .status-toast.show { opacity: 1; }
 
         .biomes-grid {
             display: grid;
@@ -93,16 +111,23 @@
             gap: 24px;
         }
 
-        /* BIOME CARDS */
         .biome-card {
-            background-color: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 16px;
             overflow: hidden;
             display: flex;
             flex-direction: column;
             transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
             position: relative;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+        }
+
+        .biome-card.active {
+            border-color: var(--accent-green);
+            box-shadow: 0 0 0 1px rgba(166, 227, 161, 0.35);
         }
 
         .biome-card:hover {
@@ -144,6 +169,7 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            gap: 8px;
         }
 
         .biome-name {
@@ -160,6 +186,7 @@
             border-radius: 6px;
             font-family: monospace;
             font-weight: 600;
+            white-space: nowrap;
         }
 
         .app-list-preview {
@@ -196,6 +223,10 @@
             transition: opacity 0.15s;
         }
 
+        .btn-launch.close {
+            background-color: var(--accent-blue);
+        }
+
         .btn-launch:hover { opacity: 0.85; }
 
         .btn-delete {
@@ -212,7 +243,6 @@
             background-color: rgba(243, 139, 168, 0.1);
         }
 
-        /* ADD NEW BIOME CARD */
         .add-card {
             border: 2px dashed var(--border);
             background-color: transparent;
@@ -234,9 +264,7 @@
             background-color: rgba(137, 180, 250, 0.03);
         }
 
-        .add-card .plus-icon {
-            font-size: 2.5rem;
-        }
+        .add-card .plus-icon { font-size: 2.5rem; }
 
         .draft-dialog {
             position: fixed;
@@ -246,37 +274,99 @@
             align-items: center;
             justify-content: center;
             padding: 24px;
-            background: rgba(0, 0, 0, 0.7);
+            background: rgba(8, 10, 18, 0.45);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
         }
 
         .draft-dialog.open { display: flex; }
 
         .draft-panel {
-            width: min(900px, 100%);
+            width: min(920px, 100%);
             max-height: 90vh;
             overflow: auto;
             padding: 24px;
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            background: var(--bg-surface);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            box-shadow:
+                0 12px 40px rgba(0, 0, 0, 0.35),
+                inset 0 1px 0 rgba(255, 255, 255, 0.18);
         }
 
         .draft-panel h2 { margin-bottom: 8px; }
-        .draft-help { color: var(--text-muted); margin-bottom: 20px; }
-        .draft-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
-        .draft-fields input { width: 100%; padding: 10px; color: var(--text-main); background: var(--bg-base); border: 1px solid var(--border); border-radius: 6px; }
+        .draft-help { color: var(--text-muted); margin-bottom: 20px; line-height: 1.4; }
+        .draft-fields {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .draft-fields input, .cover-row input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            color: var(--text-main);
+            background: var(--bg-base);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+        }
+
+        .cover-row {
+            display: grid;
+            grid-template-columns: 1fr auto auto;
+            gap: 10px;
+            margin-bottom: 20px;
+            align-items: center;
+        }
+
+        .cover-preview {
+            width: 100%;
+            height: 120px;
+            border: 1px dashed var(--border);
+            border-radius: 8px;
+            margin-bottom: 20px;
+            overflow: hidden;
+            background: #181825;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+        }
+
+        .cover-preview img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
         .draft-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
         .draft-section h3 { margin-bottom: 10px; font-size: 0.9rem; }
-        .app-source, .layout-zone { min-height: 48px; padding: 10px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-base); }
+        .app-source, .layout-zone {
+            min-height: 48px;
+            padding: 10px;
+            margin-bottom: 8px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--bg-base);
+        }
         .app-source { cursor: grab; }
         .layout-zone { border-style: dashed; }
         .layout-zone.assigned { border-style: solid; border-color: var(--accent-green); }
         .zone-label { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 5px; }
         .draft-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
-        .btn-secondary { padding: 9px 14px; color: var(--text-main); background: transparent; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+        .btn-secondary {
+            padding: 9px 14px;
+            color: var(--text-main);
+            background: transparent;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            cursor: pointer;
+        }
 
         @media (max-width: 650px) {
-            .draft-fields, .draft-columns { grid-template-columns: 1fr; }
+            .draft-fields, .draft-columns, .cover-row { grid-template-columns: 1fr; }
         }
     </style>
 </head>
@@ -285,7 +375,7 @@
     <header>
         <div class="logo-group">
             <h1>BIOMES</h1>
-            <p>Workspace Automation Engine</p>
+            <p>Lightweight Desktop Workspace Manager</p>
         </div>
         <button class="btn-create" onclick="createBiomeOnWallpaper()">
             <span>+</span> Create New Biome
@@ -294,6 +384,10 @@
 
     <main>
         <div class="section-title">Saved Workspaces</div>
+        <p class="flow-hint">
+            Create: draw grid zones → Enter → drag apps into zones → Enter → name / hotkey / cover → Save.
+            Launch or close from a card or your hotkey. Closing restores previous window positions.
+        </p>
 
         <div id="biomes-container" class="biomes-grid">
             <div class="add-card" onclick="createBiomeOnWallpaper()">
@@ -303,14 +397,26 @@
         </div>
     </main>
 
+    <div id="status-toast" class="status-toast"></div>
+
     <div id="draft-dialog" class="draft-dialog" role="dialog" aria-modal="true" aria-labelledby="draft-title">
         <div class="draft-panel">
             <h2 id="draft-title">Save new Biome</h2>
-            <p class="draft-help">Drag an active application onto each layout zone. Press Enter in the grid editor when you are ready to reach this screen.</p>
+            <p class="draft-help">
+                Zones already filled by dragging windows on the overlay are kept.
+                You can still re-assign apps here, then set a name, optional hotkey (e.g. CTRL+ALT+C), and cover image.
+            </p>
             <div class="draft-fields">
                 <input id="draft-name" type="text" maxlength="80" placeholder="Biome name, e.g. Coding">
                 <input id="draft-hotkey" type="text" maxlength="30" placeholder="Optional hotkey, e.g. CTRL+ALT+C">
             </div>
+            <div class="cover-row">
+                <input id="draft-cover-label" type="text" readonly placeholder="Optional cover image">
+                <button class="btn-secondary" type="button" onclick="document.getElementById('draft-cover-file').click()">Choose image</button>
+                <button class="btn-secondary" type="button" onclick="clearCover()">Clear</button>
+                <input id="draft-cover-file" type="file" accept="image/*" hidden>
+            </div>
+            <div id="cover-preview" class="cover-preview">No cover selected</div>
             <div class="draft-columns">
                 <section class="draft-section">
                     <h3>Active applications</h3>
@@ -330,8 +436,9 @@
 
     <script>
         let draft = null;
+        let activeBiomeId = '';
+        let savedBiomes = [];
 
-        // Send IPC command to C++
         function sendIPC(action, payload = {}) {
             if (window.chrome && window.chrome.webview) {
                 const message = { action, ...payload };
@@ -340,28 +447,45 @@
             }
         }
 
-        // Trigger native Win32 Grid Overlay over Wallpaper
+        function showStatus(message) {
+            const toast = document.getElementById('status-toast');
+            toast.textContent = message;
+            toast.classList.add('show');
+            clearTimeout(showStatus._timer);
+            showStatus._timer = setTimeout(() => toast.classList.remove('show'), 3200);
+        }
+
         function createBiomeOnWallpaper() {
             sendIPC('CREATE_NEW_BIOME');
         }
 
-        // Activate a saved Biome
         function activateBiome(biomeId) {
             sendIPC('ACTIVATE_BIOME', { id: biomeId });
         }
 
-        // Delete a Biome
         function deleteBiome(biomeId) {
+            if (!confirm('Delete this Biome?')) return;
             sendIPC('DELETE_BIOME', { id: biomeId });
         }
 
         function escapeHtml(value) {
-            return String(value).replace(/[&<>'"]/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
+            return String(value).replace(/[&<>'"]/g, char => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+            }[char]));
+        }
+
+        function appLabel(pathOrName) {
+            if (!pathOrName) return '';
+            const parts = String(pathOrName).split(/[\\/]/);
+            return parts[parts.length - 1] || pathOrName;
         }
 
         function openDraft(boxes) {
-            draft = { boxes, apps: [] };
+            draft = { boxes, apps: [], coverImagePath: '' };
             document.getElementById('draft-dialog').classList.add('open');
+            document.getElementById('draft-name').value = '';
+            document.getElementById('draft-hotkey').value = '';
+            clearCover();
             document.getElementById('draft-name').focus();
             renderDraft();
             sendIPC('GET_ACTIVE_WINDOWS');
@@ -372,17 +496,30 @@
             document.getElementById('draft-dialog').classList.remove('open');
         }
 
+        function clearCover() {
+            if (draft) draft.coverImagePath = '';
+            document.getElementById('draft-cover-label').value = '';
+            document.getElementById('draft-cover-file').value = '';
+            document.getElementById('cover-preview').innerHTML = 'No cover selected';
+        }
+
         function renderDraft() {
             if (!draft) return;
             const apps = document.getElementById('draft-apps');
             const zones = document.getElementById('draft-zones');
             apps.innerHTML = draft.apps.length
-                ? draft.apps.map(app => `<div class="app-source" draggable="true" ondragstart="startAppDrag(event, '${escapeHtml(app)}')">${escapeHtml(app)}</div>`).join('')
-                : '<div class="draft-help">No normal application windows found. Open an app and reopen this editor.</div>';
+                ? draft.apps.map(app => `
+                    <div class="app-source" draggable="true"
+                         ondragstart="startAppDrag(event, '${escapeHtml(app.path)}')">
+                        ${escapeHtml(appLabel(app.path || app.process))}
+                    </div>`).join('')
+                : '<div class="draft-help">No normal application windows found. Open an app and try again, or rely on apps already snapped on the overlay.</div>';
+
             zones.innerHTML = draft.boxes.map((box, index) => `
-                <div class="layout-zone ${box.assignedApp ? 'assigned' : ''}" ondragover="event.preventDefault()" ondrop="assignApp(event, ${index})">
+                <div class="layout-zone ${box.assignedApp ? 'assigned' : ''}"
+                     ondragover="event.preventDefault()" ondrop="assignApp(event, ${index})">
                     <div class="zone-label">Display ${box.monitorIndex + 1}, zone ${index + 1}</div>
-                    <strong>${box.assignedApp ? escapeHtml(box.assignedApp) : 'Drop an application here'}</strong>
+                    <strong>${box.assignedApp ? escapeHtml(appLabel(box.assignedApp)) : 'Drop an application here'}</strong>
                 </div>`).join('');
         }
 
@@ -403,15 +540,21 @@
             const name = document.getElementById('draft-name').value.trim();
             const hotkey = document.getElementById('draft-hotkey').value.trim();
             if (!name) { alert('Give this Biome a name before saving.'); return; }
-            if (!draft.boxes.some(box => box.assignedApp)) { alert('Assign at least one application to a layout zone.'); return; }
-            sendIPC('SAVE_BIOME', { name, hotkey, boxes: draft.boxes });
+            if (!draft.boxes.some(box => box.assignedApp)) {
+                alert('Assign at least one application to a layout zone.');
+                return;
+            }
+            sendIPC('SAVE_BIOME', {
+                name,
+                hotkey,
+                coverImagePath: draft.coverImagePath || '',
+                boxes: draft.boxes
+            });
         }
 
-        // Render Biome Cards from C++ JSON payload
         function renderBiomes(biomes) {
+            savedBiomes = biomes || [];
             const container = document.getElementById('biomes-container');
-            
-            // Remove existing cards except the "Add New" button
             const addCardHtml = `
                 <div class="add-card" onclick="createBiomeOnWallpaper()">
                     <div class="plus-icon">+</div>
@@ -420,25 +563,31 @@
             `;
 
             let cardsHtml = '';
-            biomes.forEach(biome => {
-                const appChips = biome.apps ? biome.apps.map(app => `<span class="app-chip">${app}</span>`).join('') : '';
-                
+            savedBiomes.forEach(biome => {
+                const isActive = biome.id === activeBiomeId;
+                const appChips = biome.apps
+                    ? biome.apps.map(app => `<span class="app-chip">${escapeHtml(appLabel(app))}</span>`).join('')
+                    : '';
+
                 cardsHtml += `
-                    <div class="biome-card">
+                    <div class="biome-card ${isActive ? 'active' : ''}">
                         <div class="biome-cover">
-                            ${biome.cover 
-                                ? `<img src="${biome.cover}" alt="${biome.name}">` 
+                            ${biome.cover
+                                ? `<img src="${biome.cover}" alt="${escapeHtml(biome.name)}">`
                                 : `<span class="fallback-icon">🖥️</span>`}
                         </div>
                         <div class="biome-body">
                             <div class="biome-header">
-                                <span class="biome-name">${biome.name}</span>
-                                ${biome.hotkey ? `<span class="hotkey-badge">${biome.hotkey}</span>` : ''}
+                                <span class="biome-name">${escapeHtml(biome.name)}</span>
+                                ${biome.hotkey ? `<span class="hotkey-badge">${escapeHtml(biome.hotkey)}</span>` : ''}
                             </div>
                             <div class="app-list-preview">${appChips}</div>
                             <div class="biome-actions">
-                                <button class="btn-launch" onclick="activateBiome('${biome.id}')">Launch</button>
-                                <button class="btn-delete" onclick="deleteBiome('${biome.id}')">✕</button>
+                                <button class="btn-launch ${isActive ? 'close' : ''}"
+                                        onclick="activateBiome('${escapeHtml(biome.id)}')">
+                                    ${isActive ? 'Close' : 'Launch'}
+                                </button>
+                                <button class="btn-delete" onclick="deleteBiome('${escapeHtml(biome.id)}')">✕</button>
                             </div>
                         </div>
                     </div>
@@ -448,26 +597,59 @@
             container.innerHTML = cardsHtml + addCardHtml;
         }
 
-        // IPC Listener for data sent from C++ Engine
+        document.getElementById('draft-cover-file').addEventListener('change', (event) => {
+            const file = event.target.files && event.target.files[0];
+            if (!file || !draft) return;
+            if (file.size > 2 * 1024 * 1024) {
+                alert('Please choose a cover image smaller than 2 MB.');
+                event.target.value = '';
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = () => {
+                draft.coverImagePath = String(reader.result || '');
+                document.getElementById('draft-cover-label').value = file.name;
+                document.getElementById('cover-preview').innerHTML =
+                    `<img src="${draft.coverImagePath}" alt="Cover preview">`;
+            };
+            reader.readAsDataURL(file);
+        });
+
         window.addEventListener('DOMContentLoaded', () => {
             if (window.chrome && window.chrome.webview) {
-                // Request saved Biomes on startup
                 sendIPC('GET_SAVED_BIOMES');
 
                 window.chrome.webview.addEventListener('message', (event) => {
                     const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-                    
-                    if (data.action === "LOADED_BIOMES") {
+
+                    if (data.action === 'LOADED_BIOMES') {
+                        activeBiomeId = data.activeId || '';
                         renderBiomes(data.biomes || []);
-                    } else if (data.action === "GRID_LAYOUT_READY") {
+                    } else if (data.action === 'GRID_LAYOUT_READY') {
                         openDraft(data.boxes || []);
-                    } else if (data.action === "ACTIVE_WINDOWS_LIST" && draft) {
-                        draft.apps = [...new Set((data.windows || []).map(windowInfo => windowInfo.process).filter(Boolean))];
+                    } else if (data.action === 'ACTIVE_WINDOWS_LIST' && draft) {
+                        draft.apps = (data.windows || [])
+                            .map(windowInfo => ({
+                                process: windowInfo.process || '',
+                                path: windowInfo.path || windowInfo.process || ''
+                            }))
+                            .filter(app => app.path);
+                        const seen = new Set();
+                        draft.apps = draft.apps.filter(app => {
+                            const key = app.path.toLowerCase();
+                            if (seen.has(key)) return false;
+                            seen.add(key);
+                            return true;
+                        });
                         renderDraft();
-                    } else if (data.action === "BIOME_SAVED") {
+                    } else if (data.action === 'BIOME_SAVED') {
                         cancelDraft();
-                    } else if (data.action === "STATUS") {
-                        console.log('Biomes:', data.payload);
+                        showStatus('Biome saved.');
+                    } else if (data.action === 'ACTIVE_BIOME_CHANGED') {
+                        activeBiomeId = data.id || '';
+                        renderBiomes(savedBiomes);
+                    } else if (data.action === 'STATUS') {
+                        if (data.payload) showStatus(data.payload);
                     }
                 });
             }

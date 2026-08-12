@@ -18,6 +18,8 @@ bin/
 # Temporary test / scratch files
 test.cpp
 test.exe
+pdf_extract.txt
+*.bak
 
 # IDE & Editor settings
 .vscode/
@@ -27,8 +29,16 @@ test.exe
 # Temporary WebView2 cache runtime folder
 webview_data/
 
+# Runtime logs & local biome data
+config/biomes_runtime.log
+**/config/biomes.json
+**/config/biomes.json.tmp
+
 # Compiled Executables and Libraries
 *.exe
 *.dll
 *.o
 *.a
+
+# Keep the WebView2 loader shipped with the repo for easy builds
+!WebView2Loader.dll

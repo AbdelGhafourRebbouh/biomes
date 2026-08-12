@@ -134,6 +134,7 @@ HWND WebViewWindow::s_hwnd = nullptr;
 ICoreWebView2Controller* WebViewWindow::s_controller = nullptr;
 ICoreWebView2* WebViewWindow::s_webview = nullptr;
 std::function<void(const std::string&)> WebViewWindow::s_onMessageReceived = nullptr;
+std::function<void(int)> WebViewWindow::s_onHotkeyPressed = nullptr;
 
 bool WebViewWindow::Initialize(HINSTANCE hInstance, int nCmdShow, const std::string& startUrl) {
     WNDCLASSEXA wc = { sizeof(WNDCLASSEXA) };
@@ -245,6 +246,14 @@ void WebViewWindow::SetMessageReceivedCallback(std::function<void(const std::str
     s_onMessageReceived = callback;
 }
 
+void WebViewWindow::SetHotkeyPressedCallback(std::function<void(int)> callback) {
+    s_onHotkeyPressed = callback;
+}
+
+HWND WebViewWindow::GetHwnd() {
+    return s_hwnd;
+}
+
 void WebViewWindow::RunMessageLoop() {
     MSG msg = {};
     while (GetMessage(&msg, NULL, 0, 0)) {
@@ -255,6 +264,9 @@ void WebViewWindow::RunMessageLoop() {
 
 LRESULT CALLBACK WebViewWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
+        case WM_HOTKEY:
+            if (s_onHotkeyPressed) s_onHotkeyPressed(static_cast<int>(wParam));
+            break;
         case WM_SIZE:
             if (s_controller != nullptr) {
                 RECT bounds;
@@ -276,5 +288,11 @@ LRESULT CALLBACK WebViewWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
 void WebViewWindow::RestoreDashboard() {
     if (!s_hwnd || !IsWindow(s_hwnd)) return;
     ShowWindow(s_hwnd, SW_RESTORE);
+    ShowWindow(s_hwnd, SW_SHOW);
     SetForegroundWindow(s_hwnd);
+}
+
+void WebViewWindow::HideDashboard() {
+    if (!s_hwnd || !IsWindow(s_hwnd)) return;
+    ShowWindow(s_hwnd, SW_HIDE);
 }
