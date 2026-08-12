@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <unordered_map>
+#include <filesystem>
 #include <windows.h>
 #include <psapi.h>
 #include <shellapi.h>
@@ -22,7 +23,7 @@ BOOL CALLBACK ScalerMonitorEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lp
     auto* ctx = reinterpret_cast<ScalerMonitorEnumContext*>(dwData);
     MONITORINFO mi = { sizeof(MONITORINFO) };
     if (GetMonitorInfoA(hMonitor, &mi)) {
-        ctx->rects.push_back(mi.rcMonitor);
+        ctx->rects.push_back(mi.rcWork);
     } else if (lprcMonitor) {
         ctx->rects.push_back(*lprcMonitor);
     }
@@ -81,11 +82,6 @@ void WindowScaler::SetPosition(HWND hwnd, int x, int y, int width, int height) {
 
         if (IsZoomed(hwnd) || IsIconic(hwnd)) {
             ShowWindow(hwnd, SW_RESTORE);
-        }
-
-        LONG style = GetWindowLongA(hwnd, GWL_STYLE);
-        if (style & WS_MAXIMIZE) {
-            SetWindowLongA(hwnd, GWL_STYLE, style & ~WS_MAXIMIZE);
         }
 
         BOOL res = SetWindowPos(
@@ -191,16 +187,21 @@ std::string WindowScaler::ResolveAppPath(const std::string& processName) {
         return processName;
     }
 
-    HKEY hKey;
     std::string subKey = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\" + processName;
-    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, subKey.c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-        char pathBuffer[MAX_PATH];
-        DWORD bufferSize = sizeof(pathBuffer);
-        if (RegQueryValueExA(hKey, NULL, NULL, NULL, reinterpret_cast<LPBYTE>(pathBuffer), &bufferSize) == ERROR_SUCCESS) {
+    for (const HKEY root : { HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE }) {
+        HKEY hKey;
+        if (RegOpenKeyExA(root, subKey.c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+            char pathBuffer[MAX_PATH];
+            DWORD bufferSize = sizeof(pathBuffer);
+            const LONG result = RegQueryValueExA(hKey, NULL, NULL, NULL, reinterpret_cast<LPBYTE>(pathBuffer), &bufferSize);
             RegCloseKey(hKey);
-            return std::string(pathBuffer);
+            if (result == ERROR_SUCCESS) return std::string(pathBuffer);
         }
-        RegCloseKey(hKey);
+    }
+
+    char pathBuffer[MAX_PATH];
+    if (SearchPathA(NULL, processName.c_str(), NULL, MAX_PATH, pathBuffer, NULL) > 0) {
+        return std::string(pathBuffer);
     }
 
     return processName;
@@ -216,15 +217,18 @@ bool WindowScaler::LaunchAndSnapApp(const std::string& processName, const Select
         return false;
     }
 
-    Sleep(1500);
-
-    auto activeWindows = GetActiveWindows();
-    for (const auto& win : activeWindows) {
-        if (win.processName == processName || fullPath.find(win.processName) != std::string::npos) {
-            std::cout << "[LAUNCHER] Found spawned window HWND " << win.hwnd << ", snapping..." << std::endl;
-            return SnapToBox(win.hwnd, box);
+    const std::string expectedName = std::filesystem::path(fullPath).filename().string();
+    for (int attempt = 0; attempt < 40; ++attempt) {
+        Sleep(250);
+        const auto activeWindows = GetActiveWindows();
+        for (const auto& win : activeWindows) {
+            if (_stricmp(win.processName.c_str(), expectedName.c_str()) == 0) {
+                std::cout << "[LAUNCHER] Found spawned window HWND " << win.hwnd << ", snapping..." << std::endl;
+                return SnapToBox(win.hwnd, box);
+            }
         }
     }
 
+    std::cerr << "[LAUNCHER ERROR] Timed out waiting for a window from " << fullPath << std::endl;
     return false;
 }

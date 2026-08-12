@@ -49,7 +49,14 @@ void CALLBACK GridOverlay::WinEventProc(HWINEVENTHOOK h, DWORD e, HWND hwnd, LON
 }
 
 BOOL CALLBACK GridOverlay::MonitorEnumProc(HMONITOR h, HDC hdc, LPRECT r, LPARAM d) {
-    MonitorInfoData info; info.index = (int)s_monitors.size(); info.hMonitor = h; info.rect = *r; info.hwndOverlay = NULL;
+    MONITORINFO monitorInfo = { sizeof(MONITORINFO) };
+    if (!GetMonitorInfoA(h, &monitorInfo)) return TRUE;
+
+    MonitorInfoData info;
+    info.index = static_cast<int>(s_monitors.size());
+    info.hMonitor = h;
+    info.rect = monitorInfo.rcWork;
+    info.hwndOverlay = NULL;
     s_monitors.push_back(info); return TRUE;
 }
 
