@@ -4,18 +4,26 @@
 #include <vector>
 
 struct MonitorDetail {
-    std::string deviceName; // e.g., "\\.\DISPLAY1"
-    RECT rect;              // Bounds (left, top, right, bottom)
-    int width;
-    int height;
-    bool isPrimary;
+    int index = 0;
+    std::string deviceName; // e.g. \\.\DISPLAY1
+    HMONITOR hMonitor = nullptr;
+    RECT rcWork{};          // work area (excludes taskbar) — used for overlay + snap
+    RECT rcMonitor{};       // full monitor bounds
+    int width = 0;
+    int height = 0;
+    bool isPrimary = false;
 };
 
 class MonitorManager {
 public:
-    // Enumerates all connected displays and returns their hardware details and RECT bounds
+    // Single source of truth for monitor enumeration (stable index order).
     static std::vector<MonitorDetail> GetConnectedMonitors();
 
-    // Helper to find a specific monitor by its device name
     static bool GetMonitorByName(const std::string& deviceName, MonitorDetail& outMonitor);
+
+    // Resolve saved monitorDevice to current index; returns -1 if disconnected.
+    static int ResolveMonitorIndex(const std::string& monitorDevice, int fallbackIndex);
+
+    // Work-area rect for a zone after resolving monitor index; false if invalid/disconnected.
+    static bool GetWorkAreaForBox(int monitorIndex, const std::string& monitorDevice, RECT& outWork);
 };

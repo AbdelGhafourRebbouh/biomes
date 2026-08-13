@@ -12,80 +12,80 @@
 #include <unordered_map>
 #include <unordered_set>
 
-// Forward declaration to prevent circular header inclusions
 struct SelectedBox;
 
-// Taskbar-eligible top-level window snapshot used for matching and clean-slate.
 struct WindowInfo {
     HWND hwnd = nullptr;
     DWORD processId = 0;
     std::string title;
     RECT rect{};
-    std::string processName; // e.g. chrome.exe
-    std::string processPath; // full image path when available
+    std::string processName;
+    std::string processPath;
+    std::string aumid; // Store/UWP Application User Model ID when available
 };
 
-// Cached pre-snap / pre-minimize state. WINDOWPLACEMENT is the Win32 source of truth
-// (FancyZones-style). Do NOT use GetWindowRect while a window is iconic.
 struct OriginalWindowState {
     WINDOWPLACEMENT placement{};
 };
 
+struct BiomeAppSession {
+    HWND hwnd = nullptr;
+    WINDOWPLACEMENT preBiomePlacement{};
+    bool hadPreBiomeState = false; // false when launched fresh during this session
+};
+
 class WindowScaler {
 public:
-    // --- Enumeration ---
-    // Returns visible, root, non-toolwindow, non-cloaked windows with a title.
     static std::vector<WindowInfo> GetActiveWindows();
 
-    // True if hwnd is a normal app window Biomes should manage.
     static bool IsManagedAppWindow(HWND hwnd);
 
-    // --- Clean slate (replaces fake Win+D) ---
-    // Minimizes every managed window except those in keepVisible / the dashboard.
-    // Stores WINDOWPLACEMENT for each minimized window so Close can restore them.
+    // Prefer main application windows; filters small Electron helper HWNDs.
+    static bool IsMainApplicationWindow(HWND hwnd);
+
+    static bool IsExplorerProcess(const std::string& exeOrPath);
+
+    static void MinimizeExceptPlaced(const std::vector<HWND>& placedHwnds,
+                                   HWND dashboardHwnd = nullptr);
+
+    static void MinimizeExeSiblings(const std::string& exeName, HWND keepHwnd);
+
+    static bool IsOurProcessWindow(HWND hwnd);
+
+    // Create-flow: minimize managed apps only; never Shell MinimizeAll (breaks dashboard).
+    static void PrepareForOverlayCreate(HWND dashboardHwnd);
+
     static void PrepareCleanSlate(HWND dashboardHwnd,
                                   const std::unordered_set<HWND>& keepVisible);
 
-    // --- Snap / restore ---
-    // Low-level move used by legacy BiomeManager helpers.
-    static void SetPosition(HWND hwnd, int x, int y, int width, int height);
+    // Applies saved zone geometry (SetWindowPos + fullscreen exit for Electron).
+    static bool ForceSnapToBox(HWND hwnd, const SelectedBox& box);
 
-    // Caches placement once, then sizes hwnd into the box via SetWindowPos.
-    static bool SnapToBox(HWND hwnd, const SelectedBox& box);
+    // Record pre-biome state before first snap this session.
+    static void CacheBiomeAppPreState(HWND hwnd, bool launchedFresh);
 
-    // Restores one cached HWND, then forgets it.
-    static bool RestoreWindowPosition(HWND hwnd);
+    // Restore pre-biome placement then minimize each biome app; leave clean-slate windows alone.
+    static void CloseBiomeSession();
 
-    // Restores snapped windows AND clean-slate minimized windows.
-    static void RestoreAllCapturedWindows();
+    static void RaiseBiomeWindows(const std::vector<HWND>& biomeHwnds);
 
-    // Clears all session tracking without touching window positions.
-    static void ClearSessionState();
-
-    // --- Launch ---
-    // Resolves registry App Paths / SearchPath; strips quotes and expands %ENV%.
     static std::string ResolveAppPath(const std::string& processNameOrPath);
 
-    // True when the saved binding is ApplicationFrameHost / UWP frame without AUMID.
     static bool IsUnsupportedUwpBinding(const std::string& assignedApp);
 
-    // Launch assignedApp and snap only a NEW hwnd for that process (never steals
-    // an already-used Chrome/Electron window). excludeHwnds = already placed.
-    // Returns the snapped HWND, or nullptr on failure.
     static HWND LaunchAndSnapApp(const std::string& assignedApp,
                                  const SelectedBox& box,
-                                 const std::unordered_set<HWND>& excludeHwnds);
-
-    // Legacy name kept for create-overlay flow: tracked minimize of all managed windows.
-    static void ShowDesktop();
+                                 const std::unordered_set<HWND>& excludeHwnds,
+                                 int waitTimeoutMs = 15000);
 
 private:
     static std::unordered_map<HWND, OriginalWindowState> s_originalPositions;
     static std::unordered_set<HWND> s_cleanSlateMinimized;
+    static std::unordered_map<HWND, BiomeAppSession> s_biomeAppSessions;
 
     static void CacheOriginalPosition(HWND hwnd);
     static bool ApplyPlacementRect(HWND hwnd, const RECT& screenRect);
-    static std::vector<RECT> GetWorkAreaRects();
+    static bool ComputeTargetRect(const SelectedBox& box, RECT& outTarget);
     static bool GetProcessImage(DWORD pid, std::string& outPath, std::string& outName);
     static HWND WaitForNewWindow(DWORD pid,
                                  const std::string& exeName,

@@ -23,6 +23,9 @@ public:
     // Hide the dashboard so the fullscreen grid is not confused with the app window.
     static void HideDashboard();
 
+    // Minimize to the taskbar while a biome is open (keeps Biomes alive and restorable).
+    static void MinimizeDashboard();
+
     // Native Win32 HWND used for global hotkey registration.
     static HWND GetHwnd();
 

@@ -17,7 +17,8 @@ struct SelectedBox {
     std::string exeName;       // basename e.g. chrome.exe
     std::string titleHint;     // window title at assignment time
     std::string monitorDevice; // MONITORINFOEX.szDevice when available
-    std::string aumid;         // reserved for UWP AppUserModelID
+    std::string aumid;         // Store/UWP Application User Model ID
+    std::string launchUri;     // e.g. obsidian://open?vault=...
 };
 
 struct MonitorInfoData {
@@ -47,7 +48,6 @@ public:
     static void SetCancelledCallback(std::function<void()> cb);
 
 private:
-    static BOOL CALLBACK MonitorEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData);
     static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
     static void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime);
     static void DrawGrid(HDC hdc, HWND hwnd, int mIdx);

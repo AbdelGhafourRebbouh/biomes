@@ -1,7 +1,6 @@
-# Frontend dependencies & build outputs
+# Frontend (deferred — not used in V1)
 frontend/node_modules/
 frontend/dist/
-
 # C++ Build artifacts & Executables
 build/
 bin/

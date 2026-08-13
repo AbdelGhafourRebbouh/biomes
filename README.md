@@ -15,7 +15,9 @@ Lightweight Windows desktop workspace manager. Create named layouts ("Biomes"), 
 7. **Launch** — from the card or your hotkey (toggles open/close)  
 8. **Close** — restores biome + minimized non-biome windows to previous positions  
 
-Launch keeps already-open biome apps visible, minimizes only other windows, and restores everything on close.
+Launch keeps already-open biome apps visible, minimizes only other windows, and on close biome apps return to their pre-biome size then minimize (other apps stay minimized). The Biomes dashboard minimizes to the taskbar while a biome is open — click it or press the hotkey again to close.
+
+> **Note:** If zones look misaligned after upgrading, recreate the biome once — overlay and snap now both use the monitor work area (`rcWork`).
 
 ## Requirements
 
@@ -61,14 +63,22 @@ src/main.cpp              IPC router, activate/close, hotkey wiring
 src/ui/grid_overlay.cpp   Multi-monitor grid overlay (Method 1)
 src/ui/webview_window.cpp WebView2 dashboard host
 src/core/window_scaler.cpp Snap / launch / restore windows
-src/core/json_manager.cpp Biome persistence
+src/core/app_launcher.cpp Store (AUMID) and Obsidian URI launch
+src/core/json_manager.cpp Biome persistence (biomes.json v2)
+src/core/monitor_manager.cpp Monitor rcWork enumeration
 src/core/hotkey_manager.cpp Global hotkey parse + register
-index.html                Dashboard UI
+index.html                Dashboard UI (shipped with exe)
+docs/ARCHITECTURE.md      Architecture reference
+frontend/README.md        Deferred Vite/React UI (not used in V1)
 ```
+
+See `docs/ARCHITECTURE.md` for the full module map and session model.
 
 ## Known limitations (V1)
 
-- **UWP / Store apps** saved as `ApplicationFrameHost.exe` cannot be relaunched reliably yet — reassign a classic Win32 `.exe` when possible.
+- **UWP frame hosts** saved as `ApplicationFrameHost.exe` cannot be relaunched reliably — use the real Store app window (e.g. Spotify) so Biomes captures its AUMID.
+- **Microsoft Store apps** must be assigned while open during create; Biomes activates them via AUMID, not the `WindowsApps` exe path.
+- **Obsidian** requires the target vault to be open when you snap the zone; cold start uses `obsidian://open?vault=...` from the title / Obsidian config (never the version string, never the vault picker).
 - **Multi-window apps** (Chrome, VS Code): each zone needs its own open window; Biomes will launch a new process window when one is missing.
 - Hotkeys need a modifier + key (`CTRL+ALT+C`), not a bare letter.
 - Closing a Biome restores window positions Biomes tracked during that session.
@@ -81,13 +91,17 @@ Before a public share, verify:
 
 **Multi-window (Chrome x2):** one zone takes one HWND; two zones never share; closing the snapped Chrome then reopening the biome launches a **new** window instead of stealing the other account; both Chromes restore when left open.
 
-**Missing/slow:** bad path fails that zone only; UWP/`ApplicationFrameHost` skipped clearly; slow apps wait for a **new** HWND.
+**Missing/slow:** bad path fails that zone only; UWP/`ApplicationFrameHost` skipped clearly; slow apps wait for a **new** HWND; partial success opens biome when some zones place.
 
-**Electron:** VS Code / Discord / Spotify place when open or launched.
+**Store (Spotify):** assign while open (AUMID saved); launch via AUMID without error dialog; recreate old biomes after upgrading.
+
+**Obsidian:** assign with vault open (`launchUri` saved); cold start opens vault via URI; never vault picker from Biomes.
+
+**Electron:** VS Code / Discord place when open or launched.
 
 **Monitors / hotkey:** primary + secondary zones; unplug fallback; card and hotkey toggle match; no double-hotkey corruption.
 
-**Create flow:** overlay saves path + exe + titleHint; relaunch uses binding after Chrome updates (exe name match).
+**Create flow:** overlay saves path + exe + titleHint + aumid/launchUri; relaunch uses binding after Chrome updates (exe name match).
 
 ## Feedback welcome
 

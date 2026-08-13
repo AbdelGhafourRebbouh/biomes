@@ -14,12 +14,6 @@ struct BiomeProfile {
 
 class JsonManager {
 public:
-    // Saves a complete Biome profile to a local JSON file
-    static bool SaveBiomeToFile(const std::string& filePath, const BiomeProfile& profile);
-
-    // Reads a saved JSON file and populates a BiomeProfile struct
-    static bool LoadBiomeFromFile(const std::string& filePath, BiomeProfile& outProfile);
-
     // Collection API used by the dashboard. A single file contains every saved Biome.
     static bool SaveBiomesToFile(const std::string& filePath, const std::vector<BiomeProfile>& profiles);
     static bool LoadBiomesFromFile(const std::string& filePath, std::vector<BiomeProfile>& outProfiles);

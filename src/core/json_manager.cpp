@@ -35,6 +35,7 @@ json SerializeBiome(const BiomeProfile& profile) {
         boxObj["titleHint"] = box.titleHint;
         boxObj["monitorDevice"] = box.monitorDevice;
         boxObj["aumid"] = box.aumid;
+        boxObj["launchUri"] = box.launchUri;
         j["boxes"].push_back(boxObj);
     }
 
@@ -66,6 +67,7 @@ BiomeProfile DeserializeBiome(const json& j) {
             box.titleHint = item.value("titleHint", "");
             box.monitorDevice = item.value("monitorDevice", "");
             box.aumid = item.value("aumid", "");
+            box.launchUri = item.value("launchUri", "");
             if (box.exeName.empty() && !box.assignedApp.empty()) {
                 box.exeName = std::filesystem::path(box.assignedApp).filename().string();
             }
@@ -77,35 +79,6 @@ BiomeProfile DeserializeBiome(const json& j) {
 }
 
 } // namespace
-
-bool JsonManager::SaveBiomeToFile(const std::string& filePath, const BiomeProfile& profile) {
-    std::ofstream file(filePath);
-    if (!file.is_open()) {
-        std::cerr << "[JSON] Failed to open " << filePath << " for writing." << std::endl;
-        return false;
-    }
-
-    file << SerializeBiome(profile).dump(4);
-    file.close();
-    std::cout << "[JSON] Successfully saved biome profile '" << profile.name << "' to " << filePath << std::endl;
-    return true;
-}
-
-bool JsonManager::LoadBiomeFromFile(const std::string& filePath, BiomeProfile& outProfile) {
-    std::ifstream file(filePath);
-    if (!file.is_open()) {
-        std::cerr << "[JSON] Failed to open " << filePath << " for reading." << std::endl;
-        return false;
-    }
-
-    json j;
-    file >> j;
-    file.close();
-
-    outProfile = DeserializeBiome(j);
-
-    return true;
-}
 
 bool JsonManager::SaveBiomesToFile(const std::string& filePath, const std::vector<BiomeProfile>& profiles) {
     json root;

@@ -447,12 +447,14 @@
             }
         }
 
-        function showStatus(message) {
+        function showStatus(message, durationMs) {
             const toast = document.getElementById('status-toast');
             toast.textContent = message;
             toast.classList.add('show');
             clearTimeout(showStatus._timer);
-            showStatus._timer = setTimeout(() => toast.classList.remove('show'), 3200);
+            const ms = durationMs || 3200;
+            const isPartialFailure = /failed|recreate|open the correct vault|Store app/i.test(message || '');
+            showStatus._timer = setTimeout(() => toast.classList.remove('show'), isPartialFailure ? Math.max(ms, 8000) : ms);
         }
 
         function createBiomeOnWallpaper() {

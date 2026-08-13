@@ -269,6 +269,20 @@ LRESULT CALLBACK WebViewWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
             break;
         case WM_SIZE:
             if (s_controller != nullptr) {
+                if (wParam == SIZE_MINIMIZED) {
+                    // WebView2 can wedge if left "visible" while the host is minimized.
+                    s_controller->put_IsVisible(FALSE);
+                } else {
+                    s_controller->put_IsVisible(TRUE);
+                    RECT bounds;
+                    GetClientRect(hwnd, &bounds);
+                    s_controller->put_Bounds(bounds);
+                }
+            }
+            break;
+        case WM_ACTIVATE:
+            if (LOWORD(wParam) != WA_INACTIVE && s_controller) {
+                s_controller->put_IsVisible(TRUE);
                 RECT bounds;
                 GetClientRect(hwnd, &bounds);
                 s_controller->put_Bounds(bounds);
@@ -287,12 +301,46 @@ LRESULT CALLBACK WebViewWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
 
 void WebViewWindow::RestoreDashboard() {
     if (!s_hwnd || !IsWindow(s_hwnd)) return;
-    ShowWindow(s_hwnd, SW_RESTORE);
+
+    EnableWindow(s_hwnd, TRUE);
+
+    WINDOWPLACEMENT wp{};
+    wp.length = sizeof(WINDOWPLACEMENT);
+    if (GetWindowPlacement(s_hwnd, &wp)) {
+        wp.showCmd = SW_SHOWNORMAL;
+        wp.flags &= ~WPF_RESTORETOMAXIMIZED;
+        wp.length = sizeof(WINDOWPLACEMENT);
+        SetWindowPlacement(s_hwnd, &wp);
+    }
+
     ShowWindow(s_hwnd, SW_SHOW);
+    ShowWindow(s_hwnd, SW_RESTORE);
+    SetWindowPos(s_hwnd, HWND_TOP, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+
+    AllowSetForegroundWindow(ASFW_ANY);
     SetForegroundWindow(s_hwnd);
+    BringWindowToTop(s_hwnd);
+    UpdateWindow(s_hwnd);
+
+    if (s_controller) {
+        s_controller->put_IsVisible(TRUE);
+        RECT bounds;
+        GetClientRect(s_hwnd, &bounds);
+        if (bounds.right > bounds.left && bounds.bottom > bounds.top) {
+            s_controller->put_Bounds(bounds);
+        }
+    }
 }
 
 void WebViewWindow::HideDashboard() {
     if (!s_hwnd || !IsWindow(s_hwnd)) return;
     ShowWindow(s_hwnd, SW_HIDE);
+}
+
+void WebViewWindow::MinimizeDashboard() {
+    if (!s_hwnd || !IsWindow(s_hwnd)) return;
+    // Prefer minimize over hide so Biomes stays on the taskbar / Alt+Tab
+    // while a biome session is active (hide feels like the app closed).
+    ShowWindow(s_hwnd, SW_MINIMIZE);
 }

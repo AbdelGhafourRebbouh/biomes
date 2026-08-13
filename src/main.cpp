@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <unordered_set>
 #include <unordered_map>
+#include <utility>
 #include <algorithm>
 #include <cctype>
 #include "../include/external/nlohmann/json.hpp"
@@ -16,8 +17,8 @@
 #include "../include/ui/grid_overlay.hpp"
 #include "../include/core/monitor_manager.hpp"
 #include "../include/core/json_manager.hpp"
-#include "../include/core/biome_manager.hpp"
 #include "../include/core/hotkey_manager.hpp"
+#include "../include/core/app_launcher.hpp"
 
 using json = nlohmann::json;
 
@@ -179,6 +180,12 @@ int ScoreWindowForBox(const WindowInfo& window,
     }
 
     score += TitleSimilarityScore(window.title, box.titleHint);
+
+    if (!box.aumid.empty() && !window.aumid.empty() &&
+        _stricmp(box.aumid.c_str(), window.aumid.c_str()) == 0) {
+        score += 200;
+    }
+
     return score;
 }
 
@@ -211,53 +218,147 @@ MatchResult FindBestWindowForBox(const SelectedBox& box,
         ++result.sameExeCount;
 
         const int score = ScoreWindowForBox(candidate, box, sticky);
+        const int area = (candidate.rect.right - candidate.rect.left) *
+                         (candidate.rect.bottom - candidate.rect.top);
+
         if (score > result.score) {
             result.score = score;
             result.hwnd = candidate.hwnd;
+        } else if (score == result.score && score > 0 && result.hwnd) {
+            RECT curRect = candidate.rect;
+            for (const auto& w : windows) {
+                if (w.hwnd == result.hwnd) {
+                    curRect = w.rect;
+                    break;
+                }
+            }
+            const int curArea = (curRect.right - curRect.left) * (curRect.bottom - curRect.top);
+            if (area > curArea) {
+                result.hwnd = candidate.hwnd;
+            }
+        } else if (score == result.score && score > 0 && !result.hwnd) {
+            result.hwnd = candidate.hwnd;
+        }
+    }
+
+    // Sticky HWND still alive but missing from the enum (cloaked / filter race) — reuse it.
+    if (!result.hwnd && sticky && IsWindow(sticky) && !usedWindows.count(sticky)) {
+        DWORD pid = 0;
+        GetWindowThreadProcessId(sticky, &pid);
+        WindowInfo stickyInfo;
+        stickyInfo.hwnd = sticky;
+        stickyInfo.processId = pid;
+        char path[MAX_PATH];
+        DWORD sz = MAX_PATH;
+        HANDLE hp = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+        if (hp) {
+            if (QueryFullProcessImageNameA(hp, 0, path, &sz)) {
+                stickyInfo.processPath = path;
+                stickyInfo.processName = std::filesystem::path(path).filename().string();
+            }
+            CloseHandle(hp);
+        }
+        if (SameExe(stickyInfo, box)) {
+            result.hwnd = sticky;
+            result.score = 1000 + kMinReuseScore;
+            if (result.sameExeCount == 0) result.sameExeCount = 1;
+        }
+    }
+
+    // Weak sticky with multiple siblings (e.g. wrong Explorer) — re-match by title only.
+    if (sticky && result.sameExeCount > 1 && result.hwnd == sticky &&
+        (result.score - 1000) < kMinReuseScore) {
+        result.score = 0;
+        result.hwnd = nullptr;
+        for (const auto& candidate : windows) {
+            if (usedWindows.count(candidate.hwnd)) continue;
+            if (!SameExe(candidate, box)) continue;
+            const int score = ScoreWindowForBox(candidate, box, nullptr);
+            const int area = (candidate.rect.right - candidate.rect.left) *
+                             (candidate.rect.bottom - candidate.rect.top);
+            if (score > result.score) {
+                result.score = score;
+                result.hwnd = candidate.hwnd;
+            } else if (score == result.score && score > 0 && result.hwnd) {
+                RECT curRect = candidate.rect;
+                for (const auto& w : windows) {
+                    if (w.hwnd == result.hwnd) { curRect = w.rect; break; }
+                }
+                const int curArea = (curRect.right - curRect.left) * (curRect.bottom - curRect.top);
+                if (area > curArea) result.hwnd = candidate.hwnd;
+            }
         }
     }
 
     return result;
 }
 
-bool ShouldReuseExisting(const MatchResult& match) {
+bool ShouldReuseExisting(const MatchResult& match, const SelectedBox& box) {
     if (!match.hwnd || match.score <= 0) return false;
 
-    // Sticky or path/title-strong match: always reuse.
+    const std::string exe = ExpectedExe(box);
+
+    if (AppLauncher::IsObsidianExe(exe)) {
+        if (match.sameExeCount == 1) return true;
+        return match.score >= kMinReuseScore;
+    }
+
+    // explorer.exe: never weak-match when multiple File Explorer windows are open.
+    if (WindowScaler::IsExplorerProcess(exe) &&
+        match.sameExeCount > 1 && match.score < kMinReuseScore) {
+        return false;
+    }
+
     if (match.score >= kMinReuseScore) return true;
 
-    // Exe-only match: reuse only when this is the unique unused window.
-    // Multiple Chrome windows + weak score → launch new instead of stealing sibling.
     if (match.score <= kExeOnlyScore && match.sameExeCount > 1) return false;
 
-    // Sticky was closed: never fall back to a weak sibling steal.
     if (match.stickyDead && match.score <= kExeOnlyScore) return false;
 
     return match.sameExeCount == 1;
 }
 
-int ResolveMonitorIndex(const SelectedBox& box) {
-    if (box.monitorDevice.empty()) return box.monitorIndex;
+bool ResolveZoneMonitor(const SelectedBox& box, int& outMonitorIndex, std::string& skipReason) {
+    const auto monitors = MonitorManager::GetConnectedMonitors();
+    const int resolved = MonitorManager::ResolveMonitorIndex(box.monitorDevice, box.monitorIndex);
 
-    struct Ctx {
-        std::string device;
-        int found = -1;
-        int index = 0;
-    } ctx{ box.monitorDevice, -1, 0 };
+    if (resolved < 0) {
+        skipReason = "monitor disconnected";
+        return false;
+    }
 
-    EnumDisplayMonitors(nullptr, nullptr, [](HMONITOR hMonitor, HDC, LPRECT, LPARAM lParam) -> BOOL {
-        auto* c = reinterpret_cast<Ctx*>(lParam);
-        MONITORINFOEXA info = {};
-        info.cbSize = sizeof(info);
-        if (GetMonitorInfoA(hMonitor, &info) && c->device == info.szDevice) {
-            c->found = c->index;
-            return FALSE;
+    if (monitors.size() == 1) {
+        int primaryIndex = 0;
+        for (const auto& mon : monitors) {
+            if (mon.isPrimary) {
+                primaryIndex = mon.index;
+                break;
+            }
         }
-        ++c->index;
-        return TRUE;
-    }, reinterpret_cast<LPARAM>(&ctx));
 
-    return ctx.found >= 0 ? ctx.found : box.monitorIndex;
+        if (!box.monitorDevice.empty()) {
+            MonitorDetail saved;
+            if (MonitorManager::GetMonitorByName(box.monitorDevice, saved) && !saved.isPrimary) {
+                skipReason = "secondary zone skipped (single monitor)";
+                return false;
+            }
+            if (!MonitorManager::GetMonitorByName(box.monitorDevice, saved)) {
+                skipReason = "monitor disconnected";
+                return false;
+            }
+        } else if (resolved != primaryIndex) {
+            skipReason = "secondary zone skipped (single monitor)";
+            return false;
+        }
+    }
+
+    if (resolved >= static_cast<int>(monitors.size())) {
+        skipReason = "monitor index out of range";
+        return false;
+    }
+
+    outMonitorIndex = resolved;
+    return true;
 }
 
 void ClearStickyHwnds() {
@@ -270,17 +371,29 @@ void NotifyActiveBiomeChanged() {
     );
 }
 
+void PumpUiMessagesBriefly() {
+    MSG msg{};
+    while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
+        if (msg.message == WM_QUIT) {
+            PostQuitMessage(static_cast<int>(msg.wParam));
+            return;
+        }
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+}
+
 bool DeactivateActiveBiome(std::string& status) {
     if (g_activeBiomeId.empty()) {
         status = "No Biome is currently open.";
         return false;
     }
 
-    WindowScaler::RestoreAllCapturedWindows();
-    // Keep g_stickyHwnds so the next open can reuse the same HWNDs.
-    // Dead HWNDs (user closed Chrome) are detected on next ActivateBiome.
+    WindowScaler::CloseBiomeSession();
+    WebViewWindow::RestoreDashboard();
     g_activeBiomeId.clear();
-    status = "Biome closed. Windows restored to their previous positions.";
+    status = "Biome closed. Apps minimized; other windows stay hidden.";
+    WriteRuntimeLog("[APP] " + status);
     NotifyActiveBiomeChanged();
     return true;
 }
@@ -308,14 +421,10 @@ bool ActivateBiome(const std::string& biomeId, std::string& status) {
         return false;
     }
 
-    // Switching to a different biome: restore + drop sticky map for the old layout.
-    if (!g_activeBiomeId.empty() && g_activeBiomeId != biomeId) {
-        WindowScaler::RestoreAllCapturedWindows();
+    // Switching or refreshing: close current biome session cleanly.
+    if (!g_activeBiomeId.empty()) {
+        WindowScaler::CloseBiomeSession();
         ClearStickyHwnds();
-        g_activeBiomeId.clear();
-    } else if (!g_activeBiomeId.empty() && g_activeBiomeId == biomeId) {
-        // Already active — ToggleBiome should have closed; treat as refresh.
-        WindowScaler::RestoreAllCapturedWindows();
         g_activeBiomeId.clear();
     }
 
@@ -323,30 +432,53 @@ bool ActivateBiome(const std::string& biomeId, std::string& status) {
     std::unordered_set<HWND> keepVisible;
     std::unordered_set<HWND> tentativelyUsed;
 
-    // Only keep windows we would actually reuse (strong match), not every chrome.exe.
     for (const auto& box : profile->layout) {
         if (box.assignedApp.empty()) continue;
-        const MatchResult match = FindBestWindowForBox(box, activeWindows, tentativelyUsed);
-        if (ShouldReuseExisting(match) && match.hwnd) {
+        int monitorIndex = box.monitorIndex;
+        std::string skipReason;
+        if (!ResolveZoneMonitor(box, monitorIndex, skipReason)) continue;
+
+        SelectedBox resolvedBox = box;
+        resolvedBox.monitorIndex = monitorIndex;
+
+        const MatchResult match = FindBestWindowForBox(resolvedBox, activeWindows, tentativelyUsed);
+        if (ShouldReuseExisting(match, resolvedBox) && match.hwnd) {
             keepVisible.insert(match.hwnd);
             tentativelyUsed.insert(match.hwnd);
         }
     }
 
+    WebViewWindow::MinimizeDashboard();
     WindowScaler::PrepareCleanSlate(WebViewWindow::GetHwnd(), keepVisible);
-    Sleep(150);
+    PumpUiMessagesBriefly();
+    Sleep(80);
+    PumpUiMessagesBriefly();
 
     activeWindows = WindowScaler::GetActiveWindows();
     std::unordered_set<HWND> usedWindows;
+    std::vector<HWND> placedBiomeHwnds;
+    std::vector<std::pair<HWND, SelectedBox>> placedPairs;
     size_t placed = 0;
     size_t launched = 0;
     size_t failed = 0;
     size_t skippedUwp = 0;
+    size_t skippedMonitor = 0;
     std::vector<std::string> zoneNotes;
+
+    size_t totalZones = 0;
+    for (const auto& box : profile->layout) {
+        if (!box.assignedApp.empty()) ++totalZones;
+    }
 
     for (auto box : profile->layout) {
         if (box.assignedApp.empty()) continue;
-        box.monitorIndex = ResolveMonitorIndex(box);
+
+        std::string skipReason;
+        if (!ResolveZoneMonitor(box, box.monitorIndex, skipReason)) {
+            ++skippedMonitor;
+            zoneNotes.push_back(ExpectedExe(box) + ": skipped (" + skipReason + ")");
+            continue;
+        }
 
         const std::string label = !ExpectedExe(box).empty() ? ExpectedExe(box) : box.assignedApp;
 
@@ -359,9 +491,12 @@ bool ActivateBiome(const std::string& biomeId, std::string& status) {
 
         const MatchResult match = FindBestWindowForBox(box, activeWindows, usedWindows);
 
-        if (ShouldReuseExisting(match)) {
-            if (WindowScaler::SnapToBox(match.hwnd, box)) {
+        if (ShouldReuseExisting(match, box)) {
+            WindowScaler::CacheBiomeAppPreState(match.hwnd, false);
+            if (WindowScaler::ForceSnapToBox(match.hwnd, box)) {
                 usedWindows.insert(match.hwnd);
+                placedBiomeHwnds.push_back(match.hwnd);
+                placedPairs.emplace_back(match.hwnd, box);
                 g_stickyHwnds[box.id] = match.hwnd;
                 ++placed;
                 zoneNotes.push_back(label + ": placed existing (score " + std::to_string(match.score) + ")");
@@ -372,16 +507,45 @@ bool ActivateBiome(const std::string& biomeId, std::string& status) {
             continue;
         }
 
-        // Sticky dead or ambiguous multi-instance → launch a NEW window.
-        // Exclude every currently known HWND so we never steal a sibling Chrome.
         std::unordered_set<HWND> exclude = usedWindows;
         for (const auto& win : activeWindows) {
             exclude.insert(win.hwnd);
         }
 
-        HWND newHwnd = WindowScaler::LaunchAndSnapApp(box.assignedApp, box, exclude);
+        // Obsidian: never bare-launch; reuse or URI-only path in LaunchAndSnapApp.
+        if (AppLauncher::IsObsidianExe(label)) {
+            const std::string resolvedUri = AppLauncher::ResolveObsidianLaunchUri(box);
+            if (match.sameExeCount > 0) {
+                ++failed;
+                zoneNotes.push_back(label + ": open the correct vault first (title must match)");
+                continue;
+            }
+            if (resolvedUri.empty()) {
+                ++failed;
+                zoneNotes.push_back(label + ": recreate zone with vault open (no vault resolved)");
+                continue;
+            }
+            box.launchUri = resolvedUri;
+        }
+
+        // Packaged/Store app without resolvable AUMID — skip instead of blocking error dialog.
+        if ((AppLauncher::IsPackagedAppPath(box.assignedApp) || !box.aumid.empty()) &&
+            AppLauncher::ResolveAumidCandidates(box).empty()) {
+            ++failed;
+            zoneNotes.push_back(label + ": Store app — recreate zone while app is open");
+            continue;
+        }
+
+        // Explorer: minimize extra windows before launching another copy.
+        if (WindowScaler::IsExplorerProcess(label)) {
+            WindowScaler::MinimizeExeSiblings(label, nullptr);
+        }
+
+        HWND newHwnd = WindowScaler::LaunchAndSnapApp(box.assignedApp, box, exclude, 20000);
         if (newHwnd) {
             usedWindows.insert(newHwnd);
+            placedBiomeHwnds.push_back(newHwnd);
+            placedPairs.emplace_back(newHwnd, box);
             g_stickyHwnds[box.id] = newHwnd;
             ++placed;
             ++launched;
@@ -399,15 +563,79 @@ bool ActivateBiome(const std::string& biomeId, std::string& status) {
         }
     }
 
-    g_activeBiomeId = biomeId;
-    NotifyActiveBiomeChanged();
+    // Settle pass: re-snap if iconic, wrong monitor, still fullscreen, or far from target.
+    if (!placedPairs.empty()) {
+        PumpUiMessagesBriefly();
+        Sleep(80);
+        PumpUiMessagesBriefly();
+        for (const auto& entry : placedPairs) {
+            HWND hwnd = entry.first;
+            const SelectedBox& box = entry.second;
+            if (!hwnd || !IsWindow(hwnd)) continue;
+
+            RECT current{};
+            RECT work{};
+            bool needsResnap = IsIconic(hwnd) != FALSE;
+            if (GetWindowRect(hwnd, &current)) {
+                HMONITOR mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+                MONITORINFO mi{};
+                mi.cbSize = sizeof(mi);
+                if (GetMonitorInfo(mon, &mi)) {
+                    const int monArea = (mi.rcMonitor.right - mi.rcMonitor.left) *
+                                        (mi.rcMonitor.bottom - mi.rcMonitor.top);
+                    const int winArea = (current.right - current.left) *
+                                        (current.bottom - current.top);
+                    if (monArea > 0 && winArea >= static_cast<int>(monArea * 0.85)) {
+                        needsResnap = true; // still maximized/fullscreen-sized
+                    }
+                }
+                if (MonitorManager::GetWorkAreaForBox(box.monitorIndex, box.monitorDevice, work)) {
+                    const LONG cx = (current.left + current.right) / 2;
+                    const LONG cy = (current.top + current.bottom) / 2;
+                    if (cx < work.left || cx >= work.right || cy < work.top || cy >= work.bottom) {
+                        needsResnap = true;
+                    }
+                    const int tw = work.right - work.left;
+                    const int th = work.bottom - work.top;
+                    const int expectedW = static_cast<int>(box.relWidth * tw);
+                    const int expectedH = static_cast<int>(box.relHeight * th);
+                    const int aw = current.right - current.left;
+                    const int ah = current.bottom - current.top;
+                    if (std::abs(aw - expectedW) > 80 || std::abs(ah - expectedH) > 80) {
+                        needsResnap = true;
+                    }
+                }
+            }
+            if (needsResnap) {
+                WindowScaler::ForceSnapToBox(hwnd, box);
+            }
+            PumpUiMessagesBriefly();
+        }
+    }
+
+    WindowScaler::RaiseBiomeWindows(placedBiomeHwnds);
+    WindowScaler::MinimizeExceptPlaced(placedBiomeHwnds, WebViewWindow::GetHwnd());
+    // Keep Biomes minimized on the taskbar — never destroy/hide it during launch.
+    WebViewWindow::MinimizeDashboard();
+
+    if (placed > 0) {
+        g_activeBiomeId = biomeId;
+        NotifyActiveBiomeChanged();
+    } else {
+        WebViewWindow::RestoreDashboard();
+    }
     g_activationInProgress = false;
 
     std::ostringstream summary;
-    summary << "Biome launched: " << placed << " placed";
+    if (placed > 0) {
+        summary << "Biome opened: " << placed << "/" << totalZones << " placed";
+    } else {
+        summary << "Biome launch failed: 0/" << totalZones << " placed";
+    }
     if (launched > 0) summary << " (" << launched << " newly launched)";
     if (failed > 0) summary << ", " << failed << " failed";
     if (skippedUwp > 0) summary << " [UWP slots need a real .exe]";
+    if (skippedMonitor > 0) summary << ", " << skippedMonitor << " skipped (monitor)";
     if (!zoneNotes.empty()) {
         summary << " | ";
         for (size_t i = 0; i < zoneNotes.size(); ++i) {
@@ -415,13 +643,16 @@ bool ActivateBiome(const std::string& biomeId, std::string& status) {
             summary << zoneNotes[i];
         }
     }
+    if (placed > 0) {
+        summary << " | Biomes stays on the taskbar — click it or press the hotkey again to close.";
+    }
 
     status = summary.str();
     WriteRuntimeLog("[APP] " + status);
     for (const auto& note : zoneNotes) {
         std::cout << "[PLACE] " << note << std::endl;
     }
-    return failed == 0;
+    return placed > 0;
 }
 
 bool ToggleBiome(const std::string& biomeId, std::string& status) {
@@ -438,23 +669,26 @@ void SyncHotkeysFromDisk() {
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
-    // Per-monitor DPI so overlay client coords and SetWindowPos stay aligned.
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
+#ifdef _DEBUG
     AllocConsole();
     freopen_s((FILE**)stdout, "CONOUT$", "w", stdout);
     freopen_s((FILE**)stderr, "CONOUT$", "w", stderr);
+#endif
 
     std::cout << "=== Biomes Workspace Engine Active ===" << std::endl;
     WriteRuntimeLog("[APP] Startup begin");
 
     GridOverlay::SetCompletedCallback([](const std::vector<SelectedBox>& boxes) {
         WebViewWindow::RestoreDashboard();
+        Sleep(100);
         json payload;
         payload["action"] = "GRID_LAYOUT_READY";
         payload["boxes"] = json::array();
         for (const auto& box : boxes) payload["boxes"].push_back(SerializeBox(box));
         WebViewWindow::SendMessageToUI(payload.dump());
+        WriteRuntimeLog("[APP] GRID_LAYOUT_READY sent with " + std::to_string(boxes.size()) + " boxes");
     });
     GridOverlay::SetCancelledCallback([]() {
         WebViewWindow::RestoreDashboard();
@@ -487,7 +721,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
             if (action == "CREATE_NEW_BIOME" || action == "SHOW_DESKTOP") {
                 WriteRuntimeLog("[APP] CREATE_NEW_BIOME — hide dashboard, fullscreen overlay");
-                WindowScaler::PrepareCleanSlate(WebViewWindow::GetHwnd(), {});
+                WindowScaler::PrepareForOverlayCreate(WebViewWindow::GetHwnd());
                 WebViewWindow::HideDashboard();
                 Sleep(150);
 
@@ -669,7 +903,8 @@ json SerializeBox(const SelectedBox& box) {
         {"exeName", box.exeName},
         {"titleHint", box.titleHint},
         {"monitorDevice", box.monitorDevice},
-        {"aumid", box.aumid}
+        {"aumid", box.aumid},
+        {"launchUri", box.launchUri}
     };
 }
 
@@ -690,6 +925,7 @@ SelectedBox DeserializeBox(const json& value) {
     box.titleHint = value.value("titleHint", "");
     box.monitorDevice = value.value("monitorDevice", "");
     box.aumid = value.value("aumid", "");
+    box.launchUri = value.value("launchUri", "");
     if (box.exeName.empty() && !box.assignedApp.empty()) {
         box.exeName = ExecutableName(box.assignedApp);
     }

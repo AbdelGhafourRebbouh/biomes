@@ -8,11 +8,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_executable(Biomes WIN32
     src/main.cpp
-    src/core/biome_manager.cpp
     src/core/hotkey_manager.cpp
     src/core/json_manager.cpp
     src/core/monitor_manager.cpp
     src/core/window_scaler.cpp
+    src/core/app_launcher.cpp
     src/ui/grid_overlay.cpp
     src/ui/webview_window.cpp
 )

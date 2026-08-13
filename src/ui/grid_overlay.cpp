@@ -1,5 +1,7 @@
 #define NOMINMAX
 #include "../../include/ui/grid_overlay.hpp"
+#include "../../include/core/app_launcher.hpp"
+#include "../../include/core/monitor_manager.hpp"
 
 #include <windows.h>
 #include <iostream>
@@ -8,9 +10,9 @@
 #include <psapi.h>
 
 // ---------------------------------------------------------------------------
-// GridOverlay — fullscreen top-level popup(s), one per monitor.
+// GridOverlay — one top-level popup per monitor, sized to rcWork (matches snap).
 //
-// Must NOT be a child of the dashboard. Must cover rcMonitor edge-to-edge.
+// Must NOT be a child of the dashboard.
 // DWM blur-behind on the whole layered window is avoided — it made the overlay
 // look like a panel stuck on the Biomes window instead of a real fullscreen grid.
 // Glass + corner radius apply ONLY to user-drawn boxes.
@@ -59,6 +61,14 @@ void BindWindowToBox(SelectedBox& box, HWND hwnd, const MonitorInfoData& monitor
             box.exeName = std::filesystem::path(path).filename().string();
         }
         CloseHandle(hp);
+    }
+
+    box.aumid = AppLauncher::GetAumidForWindow(hwnd);
+    if (box.aumid.empty() && AppLauncher::IsPackagedAppPath(box.assignedApp)) {
+        box.aumid = AppLauncher::ResolveAumidForBox(box);
+    }
+    if (AppLauncher::IsObsidianExe(box.exeName)) {
+        box.launchUri = AppLauncher::BuildObsidianLaunchUri(box.titleHint);
     }
 }
 
@@ -152,25 +162,6 @@ void CALLBACK GridOverlay::WinEventProc(HWINEVENTHOOK, DWORD e, HWND hwnd, LONG 
     }
 }
 
-BOOL CALLBACK GridOverlay::MonitorEnumProc(HMONITOR h, HDC, LPRECT, LPARAM) {
-    MONITORINFOEXA monitorInfo = {};
-    monitorInfo.cbSize = sizeof(MONITORINFOEXA);
-    if (!GetMonitorInfoA(h, &monitorInfo)) return TRUE;
-
-    MonitorInfoData info;
-    info.index = static_cast<int>(s_monitors.size());
-    info.hMonitor = h;
-    info.rect = monitorInfo.rcMonitor; // full screen, edge-to-edge
-    info.hwndOverlay = nullptr;
-    info.deviceName = monitorInfo.szDevice;
-    s_monitors.push_back(info);
-
-    std::cout << "[OVERLAY] Monitor " << info.index << " " << info.deviceName
-              << " LTRB " << info.rect.left << "," << info.rect.top << ","
-              << info.rect.right << "," << info.rect.bottom << std::endl;
-    return TRUE;
-}
-
 bool GridOverlay::ShowOverlay(int r, int c, const OverlayTheme& t) {
     // Tear down any previous overlay first.
     HideOverlay();
@@ -184,10 +175,25 @@ bool GridOverlay::ShowOverlay(int r, int c, const OverlayTheme& t) {
     s_isDragging = false;
     s_hoveredBoxId = -1;
 
-    EnumDisplayMonitors(nullptr, nullptr, MonitorEnumProc, 0);
-    if (s_monitors.empty()) {
+    const auto connected = MonitorManager::GetConnectedMonitors();
+    if (connected.empty()) {
         std::cerr << "[OVERLAY] No monitors found." << std::endl;
         return false;
+    }
+
+    s_monitors.clear();
+    for (const auto& mon : connected) {
+        MonitorInfoData info;
+        info.index = mon.index;
+        info.hMonitor = mon.hMonitor;
+        info.rect = mon.rcWork;
+        info.hwndOverlay = nullptr;
+        info.deviceName = mon.deviceName;
+        s_monitors.push_back(info);
+
+        std::cout << "[OVERLAY] Monitor " << info.index << " " << info.deviceName
+                  << " work LTRB " << info.rect.left << "," << info.rect.top << ","
+                  << info.rect.right << "," << info.rect.bottom << std::endl;
     }
 
     HINSTANCE hInst = GetModuleHandle(nullptr);
