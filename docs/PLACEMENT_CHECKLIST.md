@@ -46,7 +46,21 @@ Run against `build/Release/Biomes.exe` before sharing.
 ## F. Layout / monitors
 - [ ] Primary monitor zones land on primary
 - [ ] Secondary zones land on secondary
-- [ ] Laptop-only (unplug secondary) → no crash; primary zones still work
+- [ ] Laptop-only (unplug secondary) → no crash; primary zones still work; dashboard shows "Designed for 2 screens · opens this screen only"
+- [ ] Unplug secondary → activate → only primary-screen zones place; secondary apps are NOT piled onto one screen
+- [ ] Replug monitors → zones follow same physical panels via `stableMonitorId` (not volatile DISPLAY index)
+- [ ] Swap DISPLAY1/DISPLAY2 in Windows → zones still on correct hardware after re-save
+- [ ] Dock (2 mon) → undock (1 mon) → activate → redock → activate with layout variant if saved per topology
+- [ ] Dashboard card shows "Designed for 1 screen" / "Designed for 2 screens" automatically
+- [ ] `Fix layout` opens repair overlay when display setup differs
+- [ ] Display change while Biomes open → toast + refreshed biome health
+
+## F2. Topology / stable monitor identity
+- [ ] New biomes save `stableMonitorId` + `topologyHash` in JSON v3
+- [ ] Old v2 biomes still load (deviceName/index fallback)
+- [ ] Runtime log shows `[MONITOR] zone matched via stableId=...` when EDID available
+- [ ] EDID unavailable (VM) → falls back to `GDI:\\.\DISPLAYn` without crash
+- [ ] Missing monitors are always skipped (never remapped onto another screen)
 
 ## G. Session / hotkey
 - [ ] Launch from card and hotkey behave the same

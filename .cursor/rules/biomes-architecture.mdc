@@ -23,8 +23,8 @@ See also: `docs/ARCHITECTURE.md`
 - **Restore:** `WINDOWPLACEMENT` for biome session close; never `GetWindowRect` on iconic windows
 
 ## IPC — do not break message shapes
-UI→native: `CREATE_NEW_BIOME`, `SAVE_BIOME`, `DELETE_BIOME`, `ACTIVATE_BIOME`, `GET_SAVED_BIOMES`, `CLOSE_BIOME`
-Native→UI: `LOADED_BIOMES`, `GRID_LAYOUT_READY`, `STATUS`, `ACTIVE_BIOME_CHANGED`
+UI→native: `CREATE_NEW_BIOME`, `SAVE_BIOME`, `DELETE_BIOME`, `ACTIVATE_BIOME`, `GET_SAVED_BIOMES`, `CLOSE_BIOME`, `FIX_BIOME_LAYOUT`
+Native→UI: `LOADED_BIOMES`, `GRID_LAYOUT_READY`, `STATUS`, `ACTIVE_BIOME_CHANGED`, `MONITORS_CHANGED`
 Escape all user strings with `EscapeJsonString()` before embedding in JSON.
 
 ## Change discipline

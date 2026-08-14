@@ -38,12 +38,16 @@ public:
     // Fired when a registered global hotkey is pressed (hotkey id from RegisterHotKey).
     static void SetHotkeyPressedCallback(std::function<void(int)> callback);
 
+    // Fired on WM_DISPLAYCHANGE or taskbar work-area change (SPI_SETWORKAREA).
+    static void SetDisplayChangedCallback(std::function<void()> callback);
+
 private:
     static HWND s_hwnd;
     static ICoreWebView2Controller* s_controller;
     static ICoreWebView2* s_webview;
     static std::function<void(const std::string&)> s_onMessageReceived;
     static std::function<void(int)> s_onHotkeyPressed;
+    static std::function<void()> s_onDisplayChanged;
 
     static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
     static void InitWebView(const std::string& startUrl);

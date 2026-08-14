@@ -12,7 +12,7 @@ Lightweight Windows workspace manager: draw grid zones, assign apps, save biomes
 | Create overlay | `src/ui/grid_overlay.cpp` | Multi-monitor grid, snap apps to zones |
 | Window engine | `src/core/window_scaler.cpp` | Snap, launch, clean slate, session close |
 | Store / Obsidian | `src/core/app_launcher.cpp` | AUMID launch, Obsidian URI |
-| Monitors | `src/core/monitor_manager.cpp` | `rcWork` enumeration (overlay + snap) |
+| Monitors | `src/core/monitor_manager.cpp` | `rcWork`, EDID stable IDs, topology hash |
 | Persistence | `src/core/json_manager.cpp` | `config/biomes.json` v2 |
 | Hotkeys | `src/core/hotkey_manager.cpp` | Toggle biomes globally |
 
@@ -40,7 +40,7 @@ Partial success: biome opens if ≥1 zone placed; STATUS lists per-zone notes.
 
 **UI → native:** `CREATE_NEW_BIOME`, `SAVE_BIOME`, `DELETE_BIOME`, `ACTIVATE_BIOME`, `GET_SAVED_BIOMES`, `CLOSE_BIOME`, `GET_ACTIVE_WINDOWS`
 
-**Native → UI:** `LOADED_BIOMES`, `GRID_LAYOUT_READY`, `STATUS`, `ACTIVE_BIOME_CHANGED`, `ACTIVE_WINDOWS_LIST`
+**Native → UI:** `LOADED_BIOMES`, `GRID_LAYOUT_READY`, `STATUS`, `ACTIVE_BIOME_CHANGED`, `ACTIVE_WINDOWS_LIST`, `MONITORS_CHANGED`
 
 Escape user strings with `EscapeJsonString()` before embedding in JSON.
 

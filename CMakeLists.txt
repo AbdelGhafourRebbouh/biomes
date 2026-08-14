@@ -22,7 +22,7 @@ target_include_directories(Biomes PRIVATE
     include/external/webview2
 )
 
-target_link_libraries(Biomes PRIVATE ole32 user32 shell32 advapi32 gdi32 dwmapi)
+target_link_libraries(Biomes PRIVATE ole32 user32 shell32 advapi32 gdi32 dwmapi shcore)
 
 add_custom_command(TARGET Biomes POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different

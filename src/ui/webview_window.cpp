@@ -135,6 +135,7 @@ ICoreWebView2Controller* WebViewWindow::s_controller = nullptr;
 ICoreWebView2* WebViewWindow::s_webview = nullptr;
 std::function<void(const std::string&)> WebViewWindow::s_onMessageReceived = nullptr;
 std::function<void(int)> WebViewWindow::s_onHotkeyPressed = nullptr;
+std::function<void()> WebViewWindow::s_onDisplayChanged = nullptr;
 
 bool WebViewWindow::Initialize(HINSTANCE hInstance, int nCmdShow, const std::string& startUrl) {
     WNDCLASSEXA wc = { sizeof(WNDCLASSEXA) };
@@ -250,6 +251,10 @@ void WebViewWindow::SetHotkeyPressedCallback(std::function<void(int)> callback) 
     s_onHotkeyPressed = callback;
 }
 
+void WebViewWindow::SetDisplayChangedCallback(std::function<void()> callback) {
+    s_onDisplayChanged = callback;
+}
+
 HWND WebViewWindow::GetHwnd() {
     return s_hwnd;
 }
@@ -266,6 +271,14 @@ LRESULT CALLBACK WebViewWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
     switch (uMsg) {
         case WM_HOTKEY:
             if (s_onHotkeyPressed) s_onHotkeyPressed(static_cast<int>(wParam));
+            break;
+        case WM_DISPLAYCHANGE:
+            if (s_onDisplayChanged) s_onDisplayChanged();
+            break;
+        case WM_SETTINGCHANGE:
+            if (wParam == SPI_SETWORKAREA && s_onDisplayChanged) {
+                s_onDisplayChanged();
+            }
             break;
         case WM_SIZE:
             if (s_controller != nullptr) {

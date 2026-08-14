@@ -2,6 +2,7 @@
 #include "../../include/ui/grid_overlay.hpp"
 #include "../../include/core/app_launcher.hpp"
 #include "../../include/core/monitor_manager.hpp"
+#include "../../include/core/json_manager.hpp"
 
 #include <windows.h>
 #include <iostream>
@@ -45,6 +46,8 @@ HWND ResolveRootWindow(HWND hwnd) {
 void BindWindowToBox(SelectedBox& box, HWND hwnd, const MonitorInfoData& monitor) {
     hwnd = ResolveRootWindow(hwnd);
     box.monitorDevice = monitor.deviceName;
+    box.stableMonitorId = monitor.stableId;
+    box.topologyHash = MonitorManager::GetCurrentTopologyHash();
 
     char title[512];
     GetWindowTextA(hwnd, title, sizeof(title));
@@ -163,7 +166,11 @@ void CALLBACK GridOverlay::WinEventProc(HWINEVENTHOOK, DWORD e, HWND hwnd, LONG 
 }
 
 bool GridOverlay::ShowOverlay(int r, int c, const OverlayTheme& t) {
-    // Tear down any previous overlay first.
+    return ShowOverlayWithLayout({}, r, c, t);
+}
+
+bool GridOverlay::ShowOverlayWithLayout(const std::vector<SelectedBox>& existingBoxes,
+                                        int r, int c, const OverlayTheme& t) {
     HideOverlay();
 
     s_rows = r;
@@ -181,7 +188,6 @@ bool GridOverlay::ShowOverlay(int r, int c, const OverlayTheme& t) {
         return false;
     }
 
-    s_monitors.clear();
     for (const auto& mon : connected) {
         MonitorInfoData info;
         info.index = mon.index;
@@ -189,11 +195,34 @@ bool GridOverlay::ShowOverlay(int r, int c, const OverlayTheme& t) {
         info.rect = mon.rcWork;
         info.hwndOverlay = nullptr;
         info.deviceName = mon.deviceName;
+        info.stableId = mon.stableId;
+        info.friendlyName = mon.friendlyName;
+        info.workAreaSignature = mon.workAreaSignature;
         s_monitors.push_back(info);
 
-        std::cout << "[OVERLAY] Monitor " << info.index << " " << info.deviceName
+        const std::string label = info.friendlyName.empty() ? info.deviceName : info.friendlyName;
+        std::cout << "[OVERLAY] Monitor " << info.index << " " << label
+                  << " (" << info.workAreaSignature << ")"
                   << " work LTRB " << info.rect.left << "," << info.rect.top << ","
                   << info.rect.right << "," << info.rect.bottom << std::endl;
+    }
+
+    const std::string topologyHash = MonitorManager::GetCurrentTopologyHash();
+    if (!existingBoxes.empty()) {
+        s_savedBoxes = JsonManager::RemapLayoutToCurrentMonitors(existingBoxes);
+        for (auto& box : s_savedBoxes) {
+            box.topologyHash = topologyHash;
+            if (box.monitorIndex >= 0 && box.monitorIndex < static_cast<int>(s_monitors.size())) {
+                const int w = s_monitors[box.monitorIndex].rect.right - s_monitors[box.monitorIndex].rect.left;
+                const int h = s_monitors[box.monitorIndex].rect.bottom - s_monitors[box.monitorIndex].rect.top;
+                box.pixelRect = {
+                    static_cast<LONG>(box.relX * w),
+                    static_cast<LONG>(box.relY * h),
+                    static_cast<LONG>((box.relX + box.relWidth) * w),
+                    static_cast<LONG>((box.relY + box.relHeight) * h)
+                };
+            }
+        }
     }
 
     HINSTANCE hInst = GetModuleHandle(nullptr);
@@ -216,8 +245,6 @@ bool GridOverlay::ShowOverlay(int r, int c, const OverlayTheme& t) {
         const int width = m.rect.right - m.rect.left;
         const int height = m.rect.bottom - m.rect.top;
 
-        // Top-level popup (parent = NULL). No TOOLWINDOW — that can break z-order.
-        // No DWM blur-behind — that made it look clipped to the dashboard.
         m.hwndOverlay = CreateWindowExA(
             WS_EX_TOPMOST | WS_EX_LAYERED,
             kOverlayClass,
@@ -239,8 +266,6 @@ bool GridOverlay::ShowOverlay(int r, int c, const OverlayTheme& t) {
 
         SetWindowLongPtr(m.hwndOverlay, GWLP_USERDATA, static_cast<LONG_PTR>(m.index));
         SetLayeredWindowAttributes(m.hwndOverlay, 0, s_theme.bgAlpha, LWA_ALPHA);
-
-        // Enter must work even without focus — register immediately for draw mode.
         RegisterHotKey(m.hwndOverlay, HOTKEY_ID, 0, VK_RETURN);
 
         SetWindowPos(
@@ -256,7 +281,6 @@ bool GridOverlay::ShowOverlay(int r, int c, const OverlayTheme& t) {
         UpdateWindow(m.hwndOverlay);
     }
 
-    // Focus the first overlay so WM_KEYDOWN Enter also works as a backup.
     if (!s_monitors.empty() && s_monitors[0].hwndOverlay) {
         SetForegroundWindow(s_monitors[0].hwndOverlay);
         SetFocus(s_monitors[0].hwndOverlay);
@@ -301,6 +325,16 @@ void GridOverlay::DrawGrid(HDC hdc, HWND, int mIdx) {
     const float cellW = static_cast<float>(client.right) / s_cols;
     const float cellH = static_cast<float>(client.bottom) / s_rows;
     const int radius = (std::max)(8, s_theme.cornerRadius);
+
+    if (!s_isSnappingMode && mIdx >= 0 && mIdx < static_cast<int>(s_monitors.size())) {
+        const auto& mon = s_monitors[mIdx];
+        std::string header = mon.friendlyName.empty() ? mon.deviceName : mon.friendlyName;
+        header += "  " + mon.workAreaSignature;
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, RGB(200, 210, 225));
+        RECT headerRect{ 12, 8, client.right - 12, 36 };
+        DrawTextA(hdc, header.c_str(), -1, &headerRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    }
 
     // 1) Draw boxes first (slightly inset so they sit inside cells).
     for (const auto& box : s_savedBoxes) {
@@ -443,6 +477,8 @@ LRESULT CALLBACK GridOverlay::WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
                 b.startCol = sc; b.endCol = ec; b.startRow = sr; b.endRow = er;
                 if (mIdx >= 0 && mIdx < static_cast<int>(s_monitors.size())) {
                     b.monitorDevice = s_monitors[mIdx].deviceName;
+                    b.stableMonitorId = s_monitors[mIdx].stableId;
+                    b.topologyHash = MonitorManager::GetCurrentTopologyHash();
                 }
                 s_savedBoxes.push_back(b);
                 InvalidateRect(hwnd, nullptr, FALSE);

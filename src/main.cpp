@@ -30,12 +30,14 @@ using json = nlohmann::json;
 //   GET_ACTIVE_WINDOWS               list taskbar-eligible windows
 //   GET_SAVED_BIOMES                 load dashboard cards
 //   SAVE_BIOME {name,hotkey,coverImagePath,boxes[]}
+//   FIX_BIOME_LAYOUT {id}            reopen overlay with remapped zones
 //   DELETE_BIOME {id}
 //   ACTIVATE_BIOME {id}              toggle launch/close
 //   CLOSE_BIOME / RESTORE_ALL        close active biome + restore placements
 //
 // Native → UI
 //   LOADED_BIOMES {biomes,activeId}
+//   MONITORS_CHANGED {payload:{topologyHash,monitors[]}}
 //   GRID_LAYOUT_READY {boxes}
 //   ACTIVE_WINDOWS_LIST {windows}
 //   BIOME_SAVED
@@ -319,46 +321,26 @@ bool ShouldReuseExisting(const MatchResult& match, const SelectedBox& box) {
 }
 
 bool ResolveZoneMonitor(const SelectedBox& box, int& outMonitorIndex, std::string& skipReason) {
-    const auto monitors = MonitorManager::GetConnectedMonitors();
-    const int resolved = MonitorManager::ResolveMonitorIndex(box.monitorDevice, box.monitorIndex);
+    MonitorBoxRef ref{};
+    ref.stableMonitorId = box.stableMonitorId;
+    ref.monitorDevice = box.monitorDevice;
+    ref.monitorIndex = box.monitorIndex;
 
-    if (resolved < 0) {
-        skipReason = "monitor disconnected";
+    const MonitorResolveResult resolved = MonitorManager::ResolveMonitorForBox(ref);
+    if (resolved.resolvedIndex < 0) {
+        skipReason = resolved.skipReason.empty() ? "monitor disconnected" : resolved.skipReason;
         return false;
     }
 
-    if (monitors.size() == 1) {
-        int primaryIndex = 0;
-        for (const auto& mon : monitors) {
-            if (mon.isPrimary) {
-                primaryIndex = mon.index;
-                break;
-            }
-        }
-
-        if (!box.monitorDevice.empty()) {
-            MonitorDetail saved;
-            if (MonitorManager::GetMonitorByName(box.monitorDevice, saved) && !saved.isPrimary) {
-                skipReason = "secondary zone skipped (single monitor)";
-                return false;
-            }
-            if (!MonitorManager::GetMonitorByName(box.monitorDevice, saved)) {
-                skipReason = "monitor disconnected";
-                return false;
-            }
-        } else if (resolved != primaryIndex) {
-            skipReason = "secondary zone skipped (single monitor)";
-            return false;
-        }
-    }
-
-    if (resolved >= static_cast<int>(monitors.size())) {
-        skipReason = "monitor index out of range";
-        return false;
-    }
-
-    outMonitorIndex = resolved;
+    outMonitorIndex = resolved.resolvedIndex;
     return true;
+}
+
+void SendMonitorsChangedToUi() {
+    const std::string payload = MonitorManager::SerializeMonitorsJson();
+    WebViewWindow::SendMessageToUI(
+        std::string("{\"action\":\"MONITORS_CHANGED\",\"payload\":") + payload + "}"
+    );
 }
 
 void ClearStickyHwnds() {
@@ -428,11 +410,13 @@ bool ActivateBiome(const std::string& biomeId, std::string& status) {
         g_activeBiomeId.clear();
     }
 
+    const std::vector<SelectedBox> layout = JsonManager::SelectLayoutForTopology(*profile);
+
     std::vector<WindowInfo> activeWindows = WindowScaler::GetActiveWindows();
     std::unordered_set<HWND> keepVisible;
     std::unordered_set<HWND> tentativelyUsed;
 
-    for (const auto& box : profile->layout) {
+    for (const auto& box : layout) {
         if (box.assignedApp.empty()) continue;
         int monitorIndex = box.monitorIndex;
         std::string skipReason;
@@ -466,11 +450,11 @@ bool ActivateBiome(const std::string& biomeId, std::string& status) {
     std::vector<std::string> zoneNotes;
 
     size_t totalZones = 0;
-    for (const auto& box : profile->layout) {
+    for (const auto& box : layout) {
         if (!box.assignedApp.empty()) ++totalZones;
     }
 
-    for (auto box : profile->layout) {
+    for (auto box : layout) {
         if (box.assignedApp.empty()) continue;
 
         std::string skipReason;
@@ -589,7 +573,7 @@ bool ActivateBiome(const std::string& biomeId, std::string& status) {
                         needsResnap = true; // still maximized/fullscreen-sized
                     }
                 }
-                if (MonitorManager::GetWorkAreaForBox(box.monitorIndex, box.monitorDevice, work)) {
+                if (MonitorManager::GetWorkAreaForBox(box.monitorIndex, box.monitorDevice, box.stableMonitorId, work)) {
                     const LONG cx = (current.left + current.right) / 2;
                     const LONG cy = (current.top + current.bottom) / 2;
                     if (cx < work.left || cx >= work.right || cy < work.top || cy >= work.bottom) {
@@ -788,12 +772,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                 bool replaced = false;
                 for (auto& existing : profiles) {
                     if (existing.id == profile.id) {
+                        profile.layoutVariants = existing.layoutVariants;
+                        JsonManager::EnrichProfileForSave(profile);
                         existing = profile;
                         replaced = true;
                         break;
                     }
                 }
-                if (!replaced) profiles.push_back(profile);
+                if (!replaced) {
+                    JsonManager::EnrichProfileForSave(profile);
+                    profiles.push_back(profile);
+                }
 
                 std::filesystem::create_directories(configPath.parent_path());
                 if (!JsonManager::SaveBiomesToFile(configPath.string(), profiles)) {
@@ -804,6 +793,40 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                 SyncHotkeysFromDisk();
                 SendSavedBiomesToUi();
                 WebViewWindow::SendMessageToUI(R"({"action":"BIOME_SAVED"})");
+            }
+            else if (action == "FIX_BIOME_LAYOUT") {
+                const std::string biomeId = request.value("id", "");
+                if (biomeId.empty()) {
+                    WebViewWindow::SendMessageToUI(R"({"action":"STATUS","payload":"Missing Biome id."})");
+                    return;
+                }
+
+                std::vector<BiomeProfile> profiles;
+                if (!JsonManager::LoadBiomesFromFile(GetBiomesConfigPath().string(), profiles)) {
+                    WebViewWindow::SendMessageToUI(R"({"action":"STATUS","payload":"Could not read saved Biomes."})");
+                    return;
+                }
+
+                const auto profile = std::find_if(profiles.begin(), profiles.end(), [&](const BiomeProfile& item) {
+                    return item.id == biomeId;
+                });
+                if (profile == profiles.end()) {
+                    WebViewWindow::SendMessageToUI(R"({"action":"STATUS","payload":"Biome not found."})");
+                    return;
+                }
+
+                const std::vector<SelectedBox> remapped =
+                    JsonManager::RemapLayoutToCurrentMonitors(profile->layout);
+
+                WriteRuntimeLog("[APP] FIX_BIOME_LAYOUT — hide dashboard, repair overlay");
+                WindowScaler::PrepareForOverlayCreate(WebViewWindow::GetHwnd());
+                WebViewWindow::HideDashboard();
+                Sleep(150);
+
+                if (!GridOverlay::ShowOverlayWithLayout(remapped)) {
+                    WebViewWindow::RestoreDashboard();
+                    WebViewWindow::SendMessageToUI(R"({"action":"STATUS","payload":"Could not open the repair overlay."})");
+                }
             }
             else if (action == "DELETE_BIOME") {
                 const std::string biomeId = request.value("id", "");
@@ -879,6 +902,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     }
 
     SyncHotkeysFromDisk();
+
+    WebViewWindow::SetDisplayChangedCallback([]() {
+        WriteRuntimeLog("[APP] Display or work-area change detected");
+        SendMonitorsChangedToUi();
+    });
+    SendMonitorsChangedToUi();
+
     WebViewWindow::RunMessageLoop();
 
     HotkeyManager::Clear(WebViewWindow::GetHwnd());
@@ -903,6 +933,8 @@ json SerializeBox(const SelectedBox& box) {
         {"exeName", box.exeName},
         {"titleHint", box.titleHint},
         {"monitorDevice", box.monitorDevice},
+        {"stableMonitorId", box.stableMonitorId},
+        {"topologyHash", box.topologyHash},
         {"aumid", box.aumid},
         {"launchUri", box.launchUri}
     };
@@ -924,6 +956,8 @@ SelectedBox DeserializeBox(const json& value) {
     box.exeName = value.value("exeName", "");
     box.titleHint = value.value("titleHint", "");
     box.monitorDevice = value.value("monitorDevice", "");
+    box.stableMonitorId = value.value("stableMonitorId", "");
+    box.topologyHash = value.value("topologyHash", "");
     box.aumid = value.value("aumid", "");
     box.launchUri = value.value("launchUri", "");
     if (box.exeName.empty() && !box.assignedApp.empty()) {

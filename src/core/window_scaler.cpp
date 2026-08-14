@@ -298,7 +298,7 @@ void WindowScaler::CacheBiomeAppPreState(HWND hwnd, bool launchedFresh) {
 
 bool WindowScaler::ComputeTargetRect(const SelectedBox& box, RECT& outTarget) {
     RECT work{};
-    if (!MonitorManager::GetWorkAreaForBox(box.monitorIndex, box.monitorDevice, work)) {
+    if (!MonitorManager::GetWorkAreaForBox(box.monitorIndex, box.monitorDevice, box.stableMonitorId, work)) {
         cerr << "[SCALER] Monitor unavailable for zone " << box.id << endl;
         return false;
     }

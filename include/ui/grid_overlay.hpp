@@ -16,9 +16,11 @@ struct SelectedBox {
     std::string assignedApp;   // full path or exe name (legacy)
     std::string exeName;       // basename e.g. chrome.exe
     std::string titleHint;     // window title at assignment time
-    std::string monitorDevice; // MONITORINFOEX.szDevice when available
-    std::string aumid;         // Store/UWP Application User Model ID
-    std::string launchUri;     // e.g. obsidian://open?vault=...
+    std::string monitorDevice;   // MONITORINFOEX.szDevice when available
+    std::string stableMonitorId; // EDID-based hardware id (falls back to GDI:DISPLAYn)
+    std::string topologyHash;    // hash of connected monitor set at save time
+    std::string aumid;           // Store/UWP Application User Model ID
+    std::string launchUri;       // e.g. obsidian://open?vault=...
 };
 
 struct MonitorInfoData {
@@ -26,7 +28,10 @@ struct MonitorInfoData {
     HMONITOR hMonitor = nullptr;
     RECT rect{};
     HWND hwndOverlay = nullptr;
-    std::string deviceName; // e.g. \\.\DISPLAY1
+    std::string deviceName;      // e.g. \\.\DISPLAY1
+    std::string stableId;
+    std::string friendlyName;
+    std::string workAreaSignature;
 };
 
 struct OverlayTheme {
@@ -43,6 +48,10 @@ struct OverlayTheme {
 class GridOverlay {
 public:
     static bool ShowOverlay(int rows = 8, int cols = 14, const OverlayTheme& theme = OverlayTheme());
+    // Re-open overlay with existing zones remapped to current monitors (repair flow).
+    static bool ShowOverlayWithLayout(const std::vector<SelectedBox>& existingBoxes,
+                                      int rows = 8, int cols = 14,
+                                      const OverlayTheme& theme = OverlayTheme());
     static void HideOverlay();
     static void SetCompletedCallback(std::function<void(const std::vector<SelectedBox>&)> cb);
     static void SetCancelledCallback(std::function<void()> cb);
