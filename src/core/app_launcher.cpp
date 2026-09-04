@@ -42,8 +42,13 @@ string WideToUtf8(const wstring& wide) {
     if (wide.empty()) return "";
     const int size = WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1, nullptr, 0, nullptr, nullptr);
     if (size <= 0) return "";
-    string out(static_cast<size_t>(size - 1), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1, out.data(), size, nullptr, nullptr);
+    // The reported size includes the trailing null. Allocate room for it before
+    // calling the Win32 API, then remove it from the C++ string representation.
+    string out(static_cast<size_t>(size), '\0');
+    if (WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1, out.data(), size, nullptr, nullptr) <= 0) {
+        return "";
+    }
+    out.pop_back();
     return out;
 }
 
@@ -51,8 +56,12 @@ wstring Utf8ToWide(const string& utf8) {
     if (utf8.empty()) return L"";
     const int size = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, nullptr, 0);
     if (size <= 0) return L"";
-    wstring out(static_cast<size_t>(size - 1), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, out.data(), size);
+    // As above, reserve the null terminator required by MultiByteToWideChar.
+    wstring out(static_cast<size_t>(size), L'\0');
+    if (MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, out.data(), size) <= 0) {
+        return L"";
+    }
+    out.pop_back();
     return out;
 }
 
@@ -268,11 +277,59 @@ string MatchVaultUriFromTitle(const string& windowTitle, const vector<ObsidianVa
     return "";
 }
 
-// Affinity Store uses Application Id="Canva.Affinity" (not "Affinity").
-string ReadPrimaryApplicationIdFromManifest(const string& packageRoot) {
+string FormatHresult(HRESULT value) {
+    ostringstream out;
+    out << "0x" << uppercase << hex << setw(8) << setfill('0')
+        << static_cast<unsigned long>(value);
+    return out.str();
+}
+
+bool IsValidAumid(const string& aumid) {
+    const size_t separator = aumid.find('!');
+    return separator != string::npos && separator > 0 &&
+           separator + 1 < aumid.size() &&
+           aumid.find('!', separator + 1) == string::npos;
+}
+
+bool GetPackageIdentityFromPath(const string& path, string& outPackageFamilyName,
+                                string& outPackageRoot) {
+    outPackageFamilyName.clear();
+    outPackageRoot.clear();
+
+    const string lower = ToLower(path);
+    const string marker = "\\windowsapps\\";
+    const size_t markerPos = lower.find(marker);
+    if (markerPos == string::npos) return false;
+
+    const size_t folderStart = markerPos + marker.size();
+    const size_t folderEnd = path.find('\\', folderStart);
+    const string folder = (folderEnd == string::npos)
+        ? path.substr(folderStart)
+        : path.substr(folderStart, folderEnd - folderStart);
+    const size_t hashSep = folder.rfind("__");
+    if (hashSep == string::npos || hashSep + 2 >= folder.size()) return false;
+
+    string packageWithoutPublisher = folder.substr(0, hashSep);
+    const size_t architectureSep = packageWithoutPublisher.rfind('_');
+    if (architectureSep == string::npos) return false;
+    packageWithoutPublisher.erase(architectureSep);
+
+    const size_t versionSep = packageWithoutPublisher.rfind('_');
+    if (versionSep == string::npos) return false;
+
+    outPackageFamilyName = packageWithoutPublisher.substr(0, versionSep) + "_" +
+                           folder.substr(hashSep + 2);
+    outPackageRoot = path.substr(0, folderStart) + folder;
+    return true;
+}
+
+// A package may declare several launchable applications. Return every declared
+// Id so AUMID resolution is not limited to the first manifest entry.
+vector<string> ReadApplicationIdsFromManifest(const string& packageRoot) {
+    vector<string> ids;
     const string manifestPath = packageRoot + "\\AppxManifest.xml";
     ifstream in(manifestPath, ios::binary);
-    if (!in) return "";
+    if (!in) return ids;
 
     string xml((istreambuf_iterator<char>(in)), istreambuf_iterator<char>());
     const string lower = ToLower(xml);
@@ -280,6 +337,13 @@ string ReadPrimaryApplicationIdFromManifest(const string& packageRoot) {
     while (true) {
         const size_t appTag = lower.find("<application", searchFrom);
         if (appTag == string::npos) break;
+
+        const size_t tagNameEnd = appTag + 12;
+        // Do not treat <Applications> as an <Application> element.
+        if (tagNameEnd < lower.size() && isalnum(static_cast<unsigned char>(lower[tagNameEnd]))) {
+            searchFrom = tagNameEnd;
+            continue;
+        }
 
         const size_t tagEnd = xml.find('>', appTag);
         if (tagEnd == string::npos) break;
@@ -291,12 +355,85 @@ string ReadPrimaryApplicationIdFromManifest(const string& packageRoot) {
             const size_t idStart = idKey + 4;
             const size_t idEnd = attrs.find('"', idStart);
             if (idEnd != string::npos && idEnd > idStart) {
-                return attrs.substr(idStart, idEnd - idStart);
+                const string id = attrs.substr(idStart, idEnd - idStart);
+                bool duplicate = false;
+                for (const auto& existing : ids) {
+                    if (EqualsIgnoreCase(existing, id)) {
+                        duplicate = true;
+                        break;
+                    }
+                }
+                if (!duplicate) ids.push_back(id);
             }
         }
-        searchFrom = appTag + 12;
+        searchFrom = tagEnd + 1;
     }
-    return "";
+    return ids;
+}
+
+HRESULT ActivatePackagedAppWithCom(const string& aumid, DWORD& outPid) {
+    outPid = 0;
+    if (!IsValidAumid(aumid)) return E_INVALIDARG;
+
+    const HRESULT initializeHr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    const bool mustUninitialize = SUCCEEDED(initializeHr);
+    if (FAILED(initializeHr) && initializeHr != RPC_E_CHANGED_MODE) {
+        return initializeHr;
+    }
+
+    IApplicationActivationManager* activation = nullptr;
+    const HRESULT createHr = CoCreateInstance(
+        CLSID_ApplicationActivationManager,
+        nullptr,
+        CLSCTX_LOCAL_SERVER,
+        IID_PPV_ARGS(&activation));
+    if (FAILED(createHr) || !activation) {
+        if (mustUninitialize) CoUninitialize();
+        return FAILED(createHr) ? createHr : E_FAIL;
+    }
+
+    const wstring wideAumid = Utf8ToWide(aumid);
+    const HRESULT activateHr = wideAumid.empty()
+        ? E_INVALIDARG
+        : activation->ActivateApplication(wideAumid.c_str(), nullptr, AO_NOERRORUI, &outPid);
+    activation->Release();
+    if (mustUninitialize) CoUninitialize();
+    return activateHr;
+}
+
+bool ActivatePackagedAppViaAppsFolder(const string& aumid, DWORD& outPid) {
+    outPid = 0;
+    if (!IsValidAumid(aumid)) {
+        cerr << "[LAUNCHER] AppsFolder skipped invalid AUMID: " << aumid << endl;
+        return false;
+    }
+
+    const wstring target = L"shell:AppsFolder\\" + Utf8ToWide(aumid);
+    if (target.empty()) {
+        cerr << "[LAUNCHER] AppsFolder conversion failed for " << aumid << endl;
+        return false;
+    }
+
+    SHELLEXECUTEINFOW executeInfo{};
+    executeInfo.cbSize = sizeof(executeInfo);
+    executeInfo.fMask = SEE_MASK_FLAG_NO_UI | SEE_MASK_NOCLOSEPROCESS;
+    executeInfo.lpVerb = L"open";
+    executeInfo.lpFile = target.c_str();
+    executeInfo.nShow = SW_SHOWNORMAL;
+
+    if (!ShellExecuteExW(&executeInfo)) {
+        cerr << "[LAUNCHER] AppsFolder failed for " << aumid
+             << " (Win32=" << GetLastError() << ")" << endl;
+        return false;
+    }
+
+    if (executeInfo.hProcess) {
+        outPid = GetProcessId(executeInfo.hProcess);
+        CloseHandle(executeInfo.hProcess);
+    }
+    cout << "[LAUNCHER] AppsFolder activated " << aumid
+         << " pid=" << outPid << endl;
+    return true;
 }
 
 } // namespace
@@ -366,7 +503,8 @@ string AppLauncher::GuessAumidFromPackagedPath(const string& path, const string&
     const string pfn = packageName + "_" + publisherHash;
 
     // Affinity Store uses Id="Canva.Affinity", not "Affinity" — prefer manifest.
-    string appId = ReadPrimaryApplicationIdFromManifest(packageRoot);
+    const auto manifestIds = ReadApplicationIdsFromManifest(packageRoot);
+    string appId = manifestIds.empty() ? "" : manifestIds.front();
     if (appId.empty()) {
         appId = appIdHint;
         if (_stricmp(appId.c_str(), "App") == 0 || appId.empty()) {
@@ -392,6 +530,10 @@ vector<string> AppLauncher::ResolveAumidCandidates(const SelectedBox& box) {
     vector<string> out;
     auto addUnique = [&](const string& value) {
         if (value.empty()) return;
+        if (!IsValidAumid(value)) {
+            cerr << "[LAUNCHER] Ignoring invalid AUMID candidate: " << value << endl;
+            return;
+        }
         for (const auto& existing : out) {
             if (_stricmp(existing.c_str(), value.c_str()) == 0) return;
         }
@@ -422,8 +564,9 @@ vector<string> AppLauncher::ResolveAumidCandidates(const SelectedBox& box) {
                     const size_t verSep = left.rfind('_');
                     if (verSep != string::npos) {
                         const string pfn = left.substr(0, verSep) + "_" + publisherHash;
-                        const string manifestId = ReadPrimaryApplicationIdFromManifest(packageRoot);
-                        addUnique(manifestId.empty() ? "" : pfn + "!" + manifestId);
+                        for (const auto& manifestId : ReadApplicationIdsFromManifest(packageRoot)) {
+                            addUnique(pfn + "!" + manifestId);
+                        }
 
                         string exeStem = box.exeName.empty()
                             ? ExeBaseName(box.assignedApp)
@@ -432,15 +575,10 @@ vector<string> AppLauncher::ResolveAumidCandidates(const SelectedBox& box) {
                         if (dot != string::npos) exeStem = exeStem.substr(0, dot);
                         addUnique(pfn + "!" + exeStem);
                         addUnique(pfn + "!App");
-                        if (_stricmp(exeStem.c_str(), "Spotify") == 0) {
-                            addUnique(pfn + "!Spotify");
-                        }
                     }
                 }
             }
         }
-
-        addUnique(GuessAumidFromPackagedPath(box.assignedApp, box.exeName.empty() ? "App" : box.exeName));
     }
 
     return out;
@@ -448,47 +586,21 @@ vector<string> AppLauncher::ResolveAumidCandidates(const SelectedBox& box) {
 
 bool AppLauncher::LaunchPackagedApp(const string& aumid, DWORD& outPid) {
     outPid = 0;
-    if (aumid.empty()) {
-        cerr << "[LAUNCHER] Packaged launch skipped — no AUMID" << endl;
+    if (!IsValidAumid(aumid)) {
+        cerr << "[LAUNCHER] COM activation skipped invalid AUMID: " << aumid << endl;
         return false;
     }
 
-    const HRESULT coHr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    if (FAILED(coHr) && coHr != RPC_E_CHANGED_MODE) {
-        cerr << "[LAUNCHER] CoInitializeEx failed" << endl;
-        return false;
-    }
-
-    IApplicationActivationManager* activation = nullptr;
-    const HRESULT createHr = CoCreateInstance(
-        CLSID_ApplicationActivationManager,
-        nullptr,
-        CLSCTX_LOCAL_SERVER,
-        IID_PPV_ARGS(&activation)
-    );
-
-    if (FAILED(createHr) || !activation) {
-        cerr << "[LAUNCHER] CoCreateInstance ApplicationActivationManager failed" << endl;
-        return false;
-    }
-
-    const wstring wideAumid = Utf8ToWide(aumid);
-    const HRESULT activateHr = activation->ActivateApplication(
-        wideAumid.c_str(),
-        nullptr,
-        AO_NOERRORUI,
-        &outPid
-    );
-
-    activation->Release();
+    cout << "[LAUNCHER] COM activation candidate: " << aumid << endl;
+    const HRESULT activateHr = ActivatePackagedAppWithCom(aumid, outPid);
 
     if (FAILED(activateHr)) {
         cerr << "[LAUNCHER] ActivateApplication failed for " << aumid
-             << " (hr=0x" << hex << activateHr << dec << ")" << endl;
+             << " (HRESULT=" << FormatHresult(activateHr) << ")" << endl;
         return false;
     }
 
-    cout << "[LAUNCHER] Activated packaged app " << aumid << " pid=" << outPid << endl;
+    cout << "[LAUNCHER] COM activated packaged app " << aumid << " pid=" << outPid << endl;
     return true;
 }
 
@@ -506,6 +618,17 @@ bool AppLauncher::LaunchPackagedAppForBox(const SelectedBox& box, DWORD& outPid)
             return true;
         }
     }
+
+    cerr << "[LAUNCHER] All COM AUMID candidates failed; trying AppsFolder activation." << endl;
+    for (const auto& aumid : candidates) {
+        cout << "[LAUNCHER] AppsFolder activation candidate: " << aumid << endl;
+        if (ActivatePackagedAppViaAppsFolder(aumid, outPid)) {
+            return true;
+        }
+    }
+
+    cerr << "[LAUNCHER] All packaged launch routes failed after "
+         << candidates.size() << " AUMID candidate(s)." << endl;
     return false;
 }
 

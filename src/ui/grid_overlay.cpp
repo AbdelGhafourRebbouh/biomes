@@ -3,6 +3,7 @@
 #include "../../include/core/app_launcher.hpp"
 #include "../../include/core/monitor_manager.hpp"
 #include "../../include/core/json_manager.hpp"
+#include "../../include/core/window_scaler.hpp"
 
 #include <windows.h>
 #include <iostream>
@@ -44,7 +45,13 @@ HWND ResolveRootWindow(HWND hwnd) {
 }
 
 void BindWindowToBox(SelectedBox& box, HWND hwnd, const MonitorInfoData& monitor) {
-    hwnd = ResolveRootWindow(hwnd);
+    WindowIdentity identity;
+    if (!WindowScaler::ResolveWindowIdentity(hwnd, identity)) {
+        std::cerr << "[OVERLAY] Refusing unresolved ApplicationFrameHost.exe binding" << std::endl;
+        return;
+    }
+
+    hwnd = identity.placementHwnd;
     box.monitorDevice = monitor.deviceName;
     box.stableMonitorId = monitor.stableId;
     box.topologyHash = MonitorManager::GetCurrentTopologyHash();
@@ -53,20 +60,9 @@ void BindWindowToBox(SelectedBox& box, HWND hwnd, const MonitorInfoData& monitor
     GetWindowTextA(hwnd, title, sizeof(title));
     box.titleHint = title;
 
-    DWORD pid = 0;
-    GetWindowThreadProcessId(hwnd, &pid);
-    HANDLE hp = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-    if (hp) {
-        char path[MAX_PATH];
-        DWORD sz = MAX_PATH;
-        if (QueryFullProcessImageNameA(hp, 0, path, &sz)) {
-            box.assignedApp = path;
-            box.exeName = std::filesystem::path(path).filename().string();
-        }
-        CloseHandle(hp);
-    }
-
-    box.aumid = AppLauncher::GetAumidForWindow(hwnd);
+    box.assignedApp = !identity.processPath.empty() ? identity.processPath : identity.aumid;
+    box.exeName = identity.processName;
+    box.aumid = identity.aumid;
     if (box.aumid.empty() && AppLauncher::IsPackagedAppPath(box.assignedApp)) {
         box.aumid = AppLauncher::ResolveAumidForBox(box);
     }

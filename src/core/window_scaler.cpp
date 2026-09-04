@@ -10,11 +10,15 @@
 #include <unordered_set>
 #include <filesystem>
 #include <algorithm>
+#include <limits>
 
 #include <windows.h>
+#include <appmodel.h>
 #include <psapi.h>
 #include <shellapi.h>
 #include <dwmapi.h>
+#include <propsys.h>
+#include <propkey.h>
 
 #pragma comment(lib, "dwmapi.lib")
 
@@ -61,6 +65,198 @@ bool QueryProcessImage(DWORD pid, string& outPath, string& outName) {
     }
     CloseHandle(hProcess);
     return !outPath.empty();
+}
+
+string WideToUtf8(const wchar_t* value) {
+    if (!value || !*value) return "";
+    const int size = WideCharToMultiByte(CP_UTF8, 0, value, -1, nullptr, 0, nullptr, nullptr);
+    if (size <= 1) return "";
+    string out(static_cast<size_t>(size), '\0');
+    if (WideCharToMultiByte(CP_UTF8, 0, value, -1, out.data(), size, nullptr, nullptr) <= 0) return "";
+    out.pop_back();
+    return out;
+}
+
+bool QueryProcessAumid(DWORD pid, string& outAumid) {
+    outAumid.clear();
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!process) return false;
+
+    UINT32 length = 0;
+    const LONG first = GetApplicationUserModelId(process, &length, nullptr);
+    if (first != ERROR_INSUFFICIENT_BUFFER || length == 0) {
+        CloseHandle(process);
+        return false;
+    }
+
+    vector<wchar_t> value(length);
+    const LONG second = GetApplicationUserModelId(process, &length, value.data());
+    CloseHandle(process);
+    if (second != ERROR_SUCCESS) return false;
+
+    outAumid = WideToUtf8(value.data());
+    return !outAumid.empty();
+}
+
+bool QueryWindowAumid(HWND hwnd, string& outAumid) {
+    outAumid.clear();
+    IPropertyStore* store = nullptr;
+    if (FAILED(SHGetPropertyStoreForWindow(hwnd, IID_PPV_ARGS(&store))) || !store) return false;
+
+    PROPVARIANT value{};
+    PropVariantInit(&value);
+    const HRESULT result = store->GetValue(PKEY_AppUserModel_ID, &value);
+    if (SUCCEEDED(result) && value.vt == VT_LPWSTR) {
+        outAumid = WideToUtf8(value.pwszVal);
+    }
+    PropVariantClear(&value);
+    store->Release();
+    return !outAumid.empty();
+}
+
+bool IsApplicationFrameHost(const string& processName) {
+    return _stricmp(processName.c_str(), "ApplicationFrameHost.exe") == 0;
+}
+
+struct ChildIdentitySearch {
+    DWORD hostPid = 0;
+    string preferredAumid;
+    WindowIdentity identity;
+    bool found = false;
+};
+
+struct PendingSnap {
+    SelectedBox box;
+    DWORD launchPid = 0;
+    string exeName;
+    vector<string> expectedAumids;
+    unordered_set<HWND> knownWindows;
+    ULONGLONG deadline = 0;
+    HWND snappedHwnd = nullptr;
+};
+
+vector<PendingSnap> g_pendingSnaps;
+unordered_set<HWND> g_pendingClaimedWindows;
+HWINEVENTHOOK g_pendingObjectHook = nullptr;
+HWINEVENTHOOK g_pendingForegroundHook = nullptr;
+
+bool IsWorkspaceCandidate(HWND hwnd) {
+    if (!hwnd || !IsWindow(hwnd) || !WindowScaler::IsMainApplicationWindow(hwnd)) return false;
+
+    const LONG_PTR style = GetWindowLongPtr(hwnd, GWL_STYLE);
+    // Fixed-size dialogs and splash windows are not workspace targets. Borderless
+    // apps are accepted only when they expose a maximize box.
+    return (style & WS_THICKFRAME) != 0 || (style & WS_MAXIMIZEBOX) != 0;
+}
+
+bool MatchesPendingSnap(const PendingSnap& pending, const WindowInfo& window) {
+    for (const auto& aumid : pending.expectedAumids) {
+        if (!aumid.empty() && !window.aumid.empty() &&
+            _stricmp(aumid.c_str(), window.aumid.c_str()) == 0) {
+            return true;
+        }
+    }
+    return (pending.launchPid != 0 && window.processId == pending.launchPid) ||
+           (!pending.exeName.empty() && !window.processName.empty() &&
+            _stricmp(pending.exeName.c_str(), window.processName.c_str()) == 0);
+}
+
+void StopPendingHooksIfIdle() {
+    if (!g_pendingSnaps.empty()) return;
+    if (g_pendingObjectHook) {
+        UnhookWinEvent(g_pendingObjectHook);
+        g_pendingObjectHook = nullptr;
+    }
+    if (g_pendingForegroundHook) {
+        UnhookWinEvent(g_pendingForegroundHook);
+        g_pendingForegroundHook = nullptr;
+    }
+}
+
+void ProcessPendingSnaps(HWND eventHwnd = nullptr) {
+    const ULONGLONG now = GetTickCount64();
+    const vector<WindowInfo> windows = WindowScaler::GetActiveWindows();
+
+    for (auto it = g_pendingSnaps.begin(); it != g_pendingSnaps.end();) {
+        if (now >= it->deadline) {
+            cerr << "[LAUNCHER] Timed out waiting for workspace window: " << it->exeName << endl;
+            it = g_pendingSnaps.erase(it);
+            continue;
+        }
+
+        HWND candidateHwnd = nullptr;
+        for (const auto& window : windows) {
+            if (it->knownWindows.count(window.hwnd) || g_pendingClaimedWindows.count(window.hwnd)) continue;
+            if (eventHwnd && window.hwnd != eventHwnd) continue;
+            if (!MatchesPendingSnap(*it, window) || !IsWorkspaceCandidate(window.hwnd)) continue;
+            candidateHwnd = window.hwnd;
+            break;
+        }
+
+        if (!candidateHwnd) {
+            ++it;
+            continue;
+        }
+
+        WindowScaler::CacheBiomeAppPreState(candidateHwnd, true);
+        if (WindowScaler::ForceSnapToBox(candidateHwnd, it->box)) {
+            g_pendingClaimedWindows.insert(candidateHwnd);
+            cout << "[LAUNCHER] Deferred workspace snap completed for " << it->exeName << endl;
+            it = g_pendingSnaps.erase(it);
+        } else {
+            cerr << "[LAUNCHER] Deferred workspace snap failed for " << it->exeName << endl;
+            ++it;
+        }
+    }
+    StopPendingHooksIfIdle();
+}
+
+void CALLBACK PendingWinEventProc(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG objectId,
+                                  LONG childId, DWORD, DWORD) {
+    if (objectId != OBJID_WINDOW || childId != CHILDID_SELF || !hwnd) return;
+    if (event != EVENT_OBJECT_SHOW && event != EVENT_OBJECT_NAMECHANGE &&
+        event != EVENT_SYSTEM_FOREGROUND) {
+        return;
+    }
+    ProcessPendingSnaps(GetAncestor(hwnd, GA_ROOT));
+}
+
+bool EnsurePendingHooks() {
+    if (!g_pendingObjectHook) {
+        g_pendingObjectHook = SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_NAMECHANGE,
+                                              nullptr, PendingWinEventProc, 0, 0,
+                                              WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    }
+    if (!g_pendingForegroundHook) {
+        g_pendingForegroundHook = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
+                                                  nullptr, PendingWinEventProc, 0, 0,
+                                                  WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    }
+    return g_pendingObjectHook && g_pendingForegroundHook;
+}
+
+BOOL CALLBACK FindPackagedChildWindow(HWND hwnd, LPARAM parameter) {
+    auto* search = reinterpret_cast<ChildIdentitySearch*>(parameter);
+    if (!IsWindowVisible(hwnd)) return TRUE;
+
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    if (pid == 0 || pid == search->hostPid) return TRUE;
+
+    string aumid;
+    if (!QueryProcessAumid(pid, aumid)) return TRUE;
+    if (!search->preferredAumid.empty() &&
+        _stricmp(search->preferredAumid.c_str(), aumid.c_str()) != 0) {
+        return TRUE;
+    }
+
+    WindowIdentity candidate;
+    candidate.processId = pid;
+    candidate.aumid = aumid;
+    QueryProcessImage(pid, candidate.processPath, candidate.processName);
+    search->identity = std::move(candidate);
+    search->found = true;
+    return FALSE;
 }
 
 int WindowArea(const RECT& r) {
@@ -240,22 +436,76 @@ bool WindowScaler::IsMainApplicationWindow(HWND hwnd) {
     return true;
 }
 
+bool WindowScaler::ResolveWindowIdentity(HWND hwnd, WindowIdentity& outIdentity) {
+    outIdentity = {};
+    HWND placementHwnd = GetAncestor(hwnd, GA_ROOT);
+    if (!placementHwnd) placementHwnd = hwnd;
+    if (!placementHwnd || !IsWindow(placementHwnd)) return false;
+
+    outIdentity.placementHwnd = placementHwnd;
+    DWORD outerPid = 0;
+    GetWindowThreadProcessId(placementHwnd, &outerPid);
+    QueryProcessImage(outerPid, outIdentity.processPath, outIdentity.processName);
+    outIdentity.processId = outerPid;
+    outIdentity.isApplicationFrameHost = IsApplicationFrameHost(outIdentity.processName);
+
+    string windowAumid;
+    QueryWindowAumid(placementHwnd, windowAumid);
+
+    if (!outIdentity.isApplicationFrameHost) {
+        if (!QueryProcessAumid(outerPid, outIdentity.aumid)) {
+            outIdentity.aumid = windowAumid;
+        }
+        return true;
+    }
+
+    ChildIdentitySearch childSearch;
+    childSearch.hostPid = outerPid;
+    childSearch.preferredAumid = windowAumid;
+    EnumChildWindows(placementHwnd, FindPackagedChildWindow,
+                     reinterpret_cast<LPARAM>(&childSearch));
+    if (childSearch.found) {
+        outIdentity.processId = childSearch.identity.processId;
+        outIdentity.processPath = childSearch.identity.processPath;
+        outIdentity.processName = childSearch.identity.processName;
+        outIdentity.aumid = childSearch.identity.aumid;
+        return true;
+    }
+
+    // Some UWP frames expose their AUMID only on the outer window. It is still
+    // a valid package identity, even when no child process window is enumerable.
+    if (!windowAumid.empty()) {
+        outIdentity.aumid = windowAumid;
+        outIdentity.processId = 0;
+        outIdentity.processPath.clear();
+        outIdentity.processName.clear();
+        return true;
+    }
+
+    cerr << "[UWP] Ignoring unresolved ApplicationFrameHost HWND " << placementHwnd << endl;
+    return false;
+}
+
 vector<WindowInfo> WindowScaler::GetActiveWindows() {
     vector<WindowInfo> windows;
     EnumWindows([](HWND hwnd, LPARAM lParam) -> BOOL {
         if (!WindowScaler::IsMainApplicationWindow(hwnd)) return TRUE;
 
         auto* out = reinterpret_cast<vector<WindowInfo>*>(lParam);
+        WindowIdentity identity;
+        if (!WindowScaler::ResolveWindowIdentity(hwnd, identity)) return TRUE;
+
         WindowInfo info;
-        info.hwnd = hwnd;
+        info.hwnd = identity.placementHwnd;
 
         char title[512];
         GetWindowTextA(hwnd, title, sizeof(title));
         info.title = title;
         GetWindowRect(hwnd, &info.rect);
-        GetWindowThreadProcessId(hwnd, &info.processId);
-        QueryProcessImage(info.processId, info.processPath, info.processName);
-        info.aumid = AppLauncher::GetAumidForWindow(hwnd);
+        info.processId = identity.processId;
+        info.processPath = identity.processPath;
+        info.processName = identity.processName;
+        info.aumid = identity.aumid;
         out->push_back(info);
         return TRUE;
     }, reinterpret_cast<LPARAM>(&windows));
@@ -479,6 +729,7 @@ void WindowScaler::PrepareCleanSlate(HWND dashboardHwnd, const unordered_set<HWN
 }
 
 void WindowScaler::CloseBiomeSession() {
+    CancelPendingLaunches();
     cout << "[SESSION] Closing biome session (" << s_biomeAppSessions.size() << " apps)..." << endl;
 
     for (const auto& entry : s_biomeAppSessions) {
@@ -557,6 +808,7 @@ bool WindowScaler::IsUnsupportedUwpBinding(const string& assignedApp) {
 HWND WindowScaler::WaitForNewWindow(DWORD pid,
                                     const string& exeName,
                                     const unordered_set<HWND>& excludeHwnds,
+                                    const vector<string>& expectedAumids,
                                     int timeoutMs) {
     const int stepMs = 200;
     const int attempts = std::max(1, timeoutMs / stepMs);
@@ -581,9 +833,21 @@ HWND WindowScaler::WaitForNewWindow(DWORD pid,
         for (const auto& win : GetActiveWindows()) {
             if (excludeHwnds.count(win.hwnd)) continue;
 
+            bool aumidMatch = false;
+            for (const auto& expectedAumid : expectedAumids) {
+                if (!expectedAumid.empty() && !win.aumid.empty() &&
+                    _stricmp(win.aumid.c_str(), expectedAumid.c_str()) == 0) {
+                    aumidMatch = true;
+                    break;
+                }
+            }
             bool pidMatch = (pid != 0 && win.processId == pid);
             bool exeMatch = (!exeName.empty() && _stricmp(win.processName.c_str(), exeName.c_str()) == 0);
-            if (!pidMatch && !exeMatch) continue;
+            if (!expectedAumids.empty()) {
+                if (!aumidMatch) continue;
+            } else if (!pidMatch && !exeMatch) {
+                continue;
+            }
 
             const int area = WindowArea(win.rect);
             if (area > bestArea) {
@@ -634,10 +898,10 @@ HWND WindowScaler::LaunchAndSnapApp(const string& assignedApp,
         for (const auto& win : GetActiveWindows()) {
             knownBefore.insert(win.hwnd);
         }
-        HWND hwnd = WaitForNewWindow(pid, "Obsidian.exe", knownBefore, waitTimeoutMs);
+        HWND hwnd = WaitForNewWindow(pid, "Obsidian.exe", knownBefore, {}, waitTimeoutMs);
         if (!hwnd) {
             // Protocol launch may reuse another process — accept any new Obsidian window.
-            hwnd = WaitForNewWindow(0, "Obsidian.exe", knownBefore, waitTimeoutMs);
+            hwnd = WaitForNewWindow(0, "Obsidian.exe", knownBefore, {}, waitTimeoutMs);
         }
         if (!hwnd) {
             cerr << "[LAUNCHER] Timed out waiting for Obsidian after URI launch" << endl;
@@ -664,9 +928,9 @@ HWND WindowScaler::LaunchAndSnapApp(const string& assignedApp,
         for (const auto& win : GetActiveWindows()) {
             knownBefore.insert(win.hwnd);
         }
-        HWND hwnd = WaitForNewWindow(pid, exeName, knownBefore, waitTimeoutMs);
+        HWND hwnd = WaitForNewWindow(pid, exeName, knownBefore, candidates, waitTimeoutMs);
         if (!hwnd) {
-            hwnd = WaitForNewWindow(0, exeName, knownBefore, waitTimeoutMs);
+            hwnd = WaitForNewWindow(0, exeName, knownBefore, candidates, waitTimeoutMs);
         }
         if (!hwnd) {
             cerr << "[LAUNCHER] Timed out waiting for packaged app " << candidates.front() << endl;
@@ -731,7 +995,7 @@ HWND WindowScaler::LaunchAndSnapApp(const string& assignedApp,
         }
     }
 
-    HWND hwnd = WaitForNewWindow(launchedPid, exeName, knownBefore, waitTimeoutMs);
+    HWND hwnd = WaitForNewWindow(launchedPid, exeName, knownBefore, {}, waitTimeoutMs);
     if (!hwnd) {
         cerr << "[LAUNCHER] Timed out waiting for a new window from " << fullPath << endl;
         return nullptr;
@@ -741,4 +1005,102 @@ HWND WindowScaler::LaunchAndSnapApp(const string& assignedApp,
     CacheBiomeAppPreState(hwnd, true);
     if (!ForceSnapToBox(hwnd, box)) return nullptr;
     return hwnd;
+}
+
+bool WindowScaler::LaunchAndTrackApp(const string& assignedApp,
+                                     const SelectedBox& box,
+                                     const unordered_set<HWND>& excludeHwnds,
+                                     string& outError) {
+    outError.clear();
+    if (IsUnsupportedUwpBinding(assignedApp)) {
+        outError = "ApplicationFrameHost.exe is not a launchable app identity";
+        return false;
+    }
+
+    const string fullPath = ResolveAppPath(assignedApp);
+    const string exeName = filesystem::path(fullPath).filename().string();
+    const bool packaged = AppLauncher::IsPackagedAppPath(fullPath) ||
+                          AppLauncher::IsPackagedAppPath(box.assignedApp) || !box.aumid.empty();
+    const bool obsidian = AppLauncher::IsObsidianExe(exeName) ||
+                          AppLauncher::IsObsidianExe(box.assignedApp);
+
+    PendingSnap pending;
+    pending.box = box;
+    pending.exeName = exeName;
+    pending.knownWindows = excludeHwnds;
+    for (const auto& window : GetActiveWindows()) pending.knownWindows.insert(window.hwnd);
+    pending.deadline = GetTickCount64() + 60000;
+    if (packaged) pending.expectedAumids = AppLauncher::ResolveAumidCandidates(box);
+
+    if (packaged && pending.expectedAumids.empty()) {
+        outError = "Store app has no resolvable AUMID";
+        return false;
+    }
+    if (!EnsurePendingHooks()) {
+        outError = "could not install workspace window tracker";
+        return false;
+    }
+
+    g_pendingSnaps.push_back(std::move(pending));
+    PendingSnap& queued = g_pendingSnaps.back();
+    DWORD pid = 0;
+    bool launched = false;
+
+    if (obsidian) {
+        const string uri = AppLauncher::ResolveObsidianLaunchUri(box);
+        if (uri.empty()) {
+            outError = "Obsidian vault could not be resolved";
+        } else {
+            launched = AppLauncher::LaunchObsidianWithUri(uri, pid);
+        }
+    } else if (packaged) {
+        launched = AppLauncher::LaunchPackagedAppForBox(box, pid);
+    } else if (FileExists(fullPath)) {
+        STARTUPINFOA startup{};
+        startup.cb = sizeof(startup);
+        PROCESS_INFORMATION process{};
+        string commandLine = "\"" + fullPath + "\"";
+        vector<char> commandBuffer(commandLine.begin(), commandLine.end());
+        commandBuffer.push_back('\0');
+        launched = CreateProcessA(fullPath.c_str(), commandBuffer.data(), nullptr, nullptr,
+                                  FALSE, 0, nullptr, nullptr, &startup, &process) != FALSE;
+        if (launched) {
+            pid = process.dwProcessId;
+            CloseHandle(process.hThread);
+            CloseHandle(process.hProcess);
+        } else {
+            SHELLEXECUTEINFOA shell{};
+            shell.cbSize = sizeof(shell);
+            shell.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
+            shell.lpVerb = "open";
+            shell.lpFile = fullPath.c_str();
+            shell.nShow = SW_SHOWNORMAL;
+            launched = ShellExecuteExA(&shell) != FALSE;
+            if (launched && shell.hProcess) {
+                pid = GetProcessId(shell.hProcess);
+                CloseHandle(shell.hProcess);
+            }
+        }
+    } else {
+        outError = "application path does not exist";
+    }
+
+    if (!launched) {
+        if (outError.empty()) outError = "launch trigger failed (" + to_string(GetLastError()) + ")";
+        g_pendingSnaps.pop_back();
+        StopPendingHooksIfIdle();
+        return false;
+    }
+
+    queued.launchPid = pid;
+    cout << "[LAUNCHER] Started async workspace tracking for " << exeName
+         << " (PID " << pid << ")" << endl;
+    ProcessPendingSnaps();
+    return true;
+}
+
+void WindowScaler::CancelPendingLaunches() {
+    g_pendingSnaps.clear();
+    g_pendingClaimedWindows.clear();
+    StopPendingHooksIfIdle();
 }

@@ -1,18 +1,22 @@
 # Frontend (deferred — not used in V1)
 frontend/node_modules/
 frontend/dist/
-# C++ Build artifacts & Executables
+
+# C++ Build artifacts, Object files & Executables
 build/
 bin/
+obj/
+out/
 *.o
 *.obj
 *.exe
-*.dll
-
-# Debug files (MSVC / MinGW PDBs & ILKs)
 *.pdb
 *.ilk
 *.idb
+
+# Ignore all DLLs EXCEPT WebView2Loader.dll
+*.dll
+!WebView2Loader.dll
 
 # Temporary test / scratch files
 test.cpp
@@ -20,24 +24,19 @@ test.exe
 pdf_extract.txt
 *.bak
 
-# IDE & Editor settings
+# IDE, Editor & AI settings
 .vscode/
 .idea/
+.vs/
+.cursor/
+.continue/
 *.swp
 
 # Temporary WebView2 cache runtime folder
 webview_data/
 
 # Runtime logs & local biome data
+*.log
 config/biomes_runtime.log
 **/config/biomes.json
 **/config/biomes.json.tmp
-
-# Compiled Executables and Libraries
-*.exe
-*.dll
-*.o
-*.a
-
-# Keep the WebView2 loader shipped with the repo for easy builds
-!WebView2Loader.dll

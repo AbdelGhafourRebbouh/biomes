@@ -24,6 +24,17 @@ struct WindowInfo {
     std::string aumid; // Store/UWP Application User Model ID when available
 };
 
+// Separates the visible HWND that must be moved from the process identity used
+// to save, launch, and match packaged applications.
+struct WindowIdentity {
+    HWND placementHwnd = nullptr;
+    DWORD processId = 0;
+    std::string processName;
+    std::string processPath;
+    std::string aumid;
+    bool isApplicationFrameHost = false;
+};
+
 struct OriginalWindowState {
     WINDOWPLACEMENT placement{};
 };
@@ -37,6 +48,10 @@ struct BiomeAppSession {
 class WindowScaler {
 public:
     static std::vector<WindowInfo> GetActiveWindows();
+
+    // Resolves a UWP host wrapper to its actual package identity while retaining
+    // the outer HWND for placement. Returns false for an unresolved host wrapper.
+    static bool ResolveWindowIdentity(HWND hwnd, WindowIdentity& outIdentity);
 
     static bool IsManagedAppWindow(HWND hwnd);
 
@@ -78,6 +93,16 @@ public:
                                  const std::unordered_set<HWND>& excludeHwnds,
                                  int waitTimeoutMs = 15000);
 
+    // Starts a missing application immediately and snaps its eventual workspace
+    // window through WinEvent notifications without blocking Biome activation.
+    static bool LaunchAndTrackApp(const std::string& assignedApp,
+                                  const SelectedBox& box,
+                                  const std::unordered_set<HWND>& excludeHwnds,
+                                  std::string& outError);
+
+    // Discards deferred launch work when a Biome is closed or replaced.
+    static void CancelPendingLaunches();
+
 private:
     static std::unordered_map<HWND, OriginalWindowState> s_originalPositions;
     static std::unordered_set<HWND> s_cleanSlateMinimized;
@@ -90,6 +115,7 @@ private:
     static HWND WaitForNewWindow(DWORD pid,
                                  const std::string& exeName,
                                  const std::unordered_set<HWND>& excludeHwnds,
+                                 const std::vector<std::string>& expectedAumids,
                                  int timeoutMs);
 };
 

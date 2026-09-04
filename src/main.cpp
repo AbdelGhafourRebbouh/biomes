@@ -125,6 +125,11 @@ bool SameExe(const WindowInfo& window, const SelectedBox& box) {
     return !expected.empty() && _stricmp(window.processName.c_str(), expected.c_str()) == 0;
 }
 
+bool SameAumid(const WindowInfo& window, const SelectedBox& box) {
+    return !box.aumid.empty() && !window.aumid.empty() &&
+           _stricmp(window.aumid.c_str(), box.aumid.c_str()) == 0;
+}
+
 int TitleSimilarityScore(const std::string& windowTitle, const std::string& titleHint) {
     if (titleHint.empty() || windowTitle.empty()) return 0;
     const std::string a = ToLowerCopy(windowTitle);
@@ -167,9 +172,10 @@ int TitleSimilarityScore(const std::string& windowTitle, const std::string& titl
 int ScoreWindowForBox(const WindowInfo& window,
                       const SelectedBox& box,
                       HWND stickyHwnd) {
-    if (!SameExe(window, box)) return 0;
+    const bool aumidMatch = SameAumid(window, box);
+    if (!aumidMatch && !SameExe(window, box)) return 0;
 
-    int score = kExeOnlyScore;
+    int score = aumidMatch ? 300 : kExeOnlyScore;
 
     if (stickyHwnd && window.hwnd == stickyHwnd) {
         score += 1000;
@@ -182,11 +188,6 @@ int ScoreWindowForBox(const WindowInfo& window,
     }
 
     score += TitleSimilarityScore(window.title, box.titleHint);
-
-    if (!box.aumid.empty() && !window.aumid.empty() &&
-        _stricmp(box.aumid.c_str(), window.aumid.c_str()) == 0) {
-        score += 200;
-    }
 
     return score;
 }
@@ -216,8 +217,8 @@ MatchResult FindBestWindowForBox(const SelectedBox& box,
 
     for (const auto& candidate : windows) {
         if (usedWindows.count(candidate.hwnd)) continue;
-        if (!SameExe(candidate, box)) continue;
-        ++result.sameExeCount;
+        if (!SameAumid(candidate, box) && !SameExe(candidate, box)) continue;
+        if (SameExe(candidate, box)) ++result.sameExeCount;
 
         const int score = ScoreWindowForBox(candidate, box, sticky);
         const int area = (candidate.rect.right - candidate.rect.left) *
@@ -245,22 +246,14 @@ MatchResult FindBestWindowForBox(const SelectedBox& box,
 
     // Sticky HWND still alive but missing from the enum (cloaked / filter race) — reuse it.
     if (!result.hwnd && sticky && IsWindow(sticky) && !usedWindows.count(sticky)) {
-        DWORD pid = 0;
-        GetWindowThreadProcessId(sticky, &pid);
         WindowInfo stickyInfo;
-        stickyInfo.hwnd = sticky;
-        stickyInfo.processId = pid;
-        char path[MAX_PATH];
-        DWORD sz = MAX_PATH;
-        HANDLE hp = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-        if (hp) {
-            if (QueryFullProcessImageNameA(hp, 0, path, &sz)) {
-                stickyInfo.processPath = path;
-                stickyInfo.processName = std::filesystem::path(path).filename().string();
+        for (const auto& candidate : WindowScaler::GetActiveWindows()) {
+            if (candidate.hwnd == sticky) {
+                stickyInfo = candidate;
+                break;
             }
-            CloseHandle(hp);
         }
-        if (SameExe(stickyInfo, box)) {
+        if (SameAumid(stickyInfo, box) || SameExe(stickyInfo, box)) {
             result.hwnd = sticky;
             result.score = 1000 + kMinReuseScore;
             if (result.sameExeCount == 0) result.sameExeCount = 1;
@@ -274,7 +267,7 @@ MatchResult FindBestWindowForBox(const SelectedBox& box,
         result.hwnd = nullptr;
         for (const auto& candidate : windows) {
             if (usedWindows.count(candidate.hwnd)) continue;
-            if (!SameExe(candidate, box)) continue;
+            if (!SameAumid(candidate, box) && !SameExe(candidate, box)) continue;
             const int score = ScoreWindowForBox(candidate, box, nullptr);
             const int area = (candidate.rect.right - candidate.rect.left) *
                              (candidate.rect.bottom - candidate.rect.top);
@@ -444,6 +437,7 @@ bool ActivateBiome(const std::string& biomeId, std::string& status) {
     std::vector<std::pair<HWND, SelectedBox>> placedPairs;
     size_t placed = 0;
     size_t launched = 0;
+    size_t pendingLaunches = 0;
     size_t failed = 0;
     size_t skippedUwp = 0;
     size_t skippedMonitor = 0;
@@ -525,25 +519,20 @@ bool ActivateBiome(const std::string& biomeId, std::string& status) {
             WindowScaler::MinimizeExeSiblings(label, nullptr);
         }
 
-        HWND newHwnd = WindowScaler::LaunchAndSnapApp(box.assignedApp, box, exclude, 20000);
-        if (newHwnd) {
-            usedWindows.insert(newHwnd);
-            placedBiomeHwnds.push_back(newHwnd);
-            placedPairs.emplace_back(newHwnd, box);
-            g_stickyHwnds[box.id] = newHwnd;
-            ++placed;
+        std::string launchError;
+        if (WindowScaler::LaunchAndTrackApp(box.assignedApp, box, exclude, launchError)) {
             ++launched;
+            ++pendingLaunches;
             if (match.stickyDead) {
-                zoneNotes.push_back(label + ": launched new (previous window closed)");
+                zoneNotes.push_back(label + ": launching asynchronously (previous window closed)");
             } else if (match.sameExeCount > 1) {
-                zoneNotes.push_back(label + ": launched new (avoided sibling window)");
+                zoneNotes.push_back(label + ": launching asynchronously (avoided sibling window)");
             } else {
-                zoneNotes.push_back(label + ": launched");
+                zoneNotes.push_back(label + ": launching asynchronously");
             }
-            activeWindows = WindowScaler::GetActiveWindows();
         } else {
             ++failed;
-            zoneNotes.push_back(label + ": failed to launch/place");
+            zoneNotes.push_back(label + ": failed to launch (" + launchError + ")");
         }
     }
 
@@ -602,7 +591,7 @@ bool ActivateBiome(const std::string& biomeId, std::string& status) {
     // Keep Biomes minimized on the taskbar — never destroy/hide it during launch.
     WebViewWindow::MinimizeDashboard();
 
-    if (placed > 0) {
+    if (placed > 0 || pendingLaunches > 0) {
         g_activeBiomeId = biomeId;
         NotifyActiveBiomeChanged();
     } else {
@@ -611,12 +600,13 @@ bool ActivateBiome(const std::string& biomeId, std::string& status) {
     g_activationInProgress = false;
 
     std::ostringstream summary;
-    if (placed > 0) {
+    if (placed > 0 || pendingLaunches > 0) {
         summary << "Biome opened: " << placed << "/" << totalZones << " placed";
     } else {
         summary << "Biome launch failed: 0/" << totalZones << " placed";
     }
     if (launched > 0) summary << " (" << launched << " newly launched)";
+    if (pendingLaunches > 0) summary << "; " << pendingLaunches << " waiting for workspace windows";
     if (failed > 0) summary << ", " << failed << " failed";
     if (skippedUwp > 0) summary << " [UWP slots need a real .exe]";
     if (skippedMonitor > 0) summary << ", " << skippedMonitor << " skipped (monitor)";
@@ -627,7 +617,7 @@ bool ActivateBiome(const std::string& biomeId, std::string& status) {
             summary << zoneNotes[i];
         }
     }
-    if (placed > 0) {
+    if (placed > 0 || pendingLaunches > 0) {
         summary << " | Biomes stays on the taskbar — click it or press the hotkey again to close.";
     }
 
@@ -636,7 +626,7 @@ bool ActivateBiome(const std::string& biomeId, std::string& status) {
     for (const auto& note : zoneNotes) {
         std::cout << "[PLACE] " << note << std::endl;
     }
-    return placed > 0;
+    return placed > 0 || pendingLaunches > 0;
 }
 
 bool ToggleBiome(const std::string& biomeId, std::string& status) {
