@@ -2,6 +2,8 @@
 #include <unknwn.h>
 #include <objbase.h>
 #include <winerror.h>
+#include <windowsx.h>
+#include <dwmapi.h>
 
 #include <iostream>
 #include <string>
@@ -158,6 +160,11 @@ bool WebViewWindow::Initialize(HINSTANCE hInstance, int nCmdShow, const std::str
 
     if (!s_hwnd) return false;
 
+    // Apply the custom frame before the first visible paint, not after resizing.
+    SetWindowPos(s_hwnd, nullptr, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    const DWM_WINDOW_CORNER_PREFERENCE corners = DWMWCP_ROUND;
+    DwmSetWindowAttribute(s_hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corners, sizeof(corners));
     ShowWindow(s_hwnd, nCmdShow);
     UpdateWindow(s_hwnd);
 
@@ -208,7 +215,9 @@ void WebViewWindow::InitWebView(const std::string& startUrl) {
                                 std::wstring wMsg(jsonString);
                                 CoTaskMemFree(jsonString);
 
-                                std::string msg(wMsg.begin(), wMsg.end());
+                                const int length = WideCharToMultiByte(CP_UTF8, 0, wMsg.data(), static_cast<int>(wMsg.size()), nullptr, 0, nullptr, nullptr);
+                                std::string msg(length, '\0');
+                                if (length > 0) WideCharToMultiByte(CP_UTF8, 0, wMsg.data(), static_cast<int>(wMsg.size()), msg.data(), length, nullptr, nullptr);
                                 if (s_onMessageReceived) s_onMessageReceived(msg);
                             }
                             return S_OK;
@@ -269,6 +278,46 @@ void WebViewWindow::RunMessageLoop() {
 
 LRESULT CALLBACK WebViewWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
+        case WM_GETMINMAXINFO: {
+            auto* limits = reinterpret_cast<MINMAXINFO*>(lParam);
+            const UINT dpi = GetDpiForWindow(hwnd);
+            MONITORINFO monitor{sizeof(MONITORINFO)};
+            const bool known = GetMonitorInfo(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &monitor) != FALSE;
+            limits->ptMinTrackSize.x = (std::min<LONG>)(MulDiv(760, dpi, 96), known ? monitor.rcWork.right - monitor.rcWork.left : MAXLONG);
+            limits->ptMinTrackSize.y = (std::min<LONG>)(MulDiv(560, dpi, 96), known ? monitor.rcWork.bottom - monitor.rcWork.top : MAXLONG);
+            return 0;
+        }
+        case WM_NCCALCSIZE:
+            // Both creation (RECT) and subsequent sizing (NCCALCSIZE_PARAMS)
+            // use an edge-to-edge client area. Never reserve a caption strip.
+            if (IsZoomed(hwnd)) {
+                auto* rect = wParam
+                    ? &reinterpret_cast<NCCALCSIZE_PARAMS*>(lParam)->rgrc[0]
+                    : reinterpret_cast<RECT*>(lParam);
+                MONITORINFO monitor{sizeof(MONITORINFO)};
+                if (GetMonitorInfo(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &monitor))
+                    *rect = monitor.rcWork;
+            }
+            return 0;
+        case WM_NCHITTEST: {
+            if (IsZoomed(hwnd)) return HTCLIENT;
+            RECT rect{};
+            GetWindowRect(hwnd, &rect);
+            const int edge = MulDiv(6, GetDpiForWindow(hwnd), 96);
+            const int x = GET_X_LPARAM(lParam), y = GET_Y_LPARAM(lParam);
+            const bool left = x < rect.left + edge, right = x >= rect.right - edge;
+            const bool top = y < rect.top + edge, bottom = y >= rect.bottom - edge;
+            if (top) return left ? HTTOPLEFT : right ? HTTOPRIGHT : HTTOP;
+            if (bottom) return left ? HTBOTTOMLEFT : right ? HTBOTTOMRIGHT : HTBOTTOM;
+            return left ? HTLEFT : right ? HTRIGHT : HTCLIENT;
+        }
+        case WM_DPICHANGED: {
+            const auto* rect = reinterpret_cast<RECT*>(lParam);
+            SetWindowPos(hwnd, nullptr, rect->left, rect->top,
+                         rect->right - rect->left, rect->bottom - rect->top,
+                         SWP_NOZORDER | SWP_NOACTIVATE);
+            return 0;
+        }
         case WM_HOTKEY:
             if (s_onHotkeyPressed) s_onHotkeyPressed(static_cast<int>(wParam));
             break;

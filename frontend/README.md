@@ -1,12 +1,15 @@
-# Frontend (deferred)
+# biomes frontend
 
-V1 ships **`index.html`** next to `Biomes.exe` (copied by CMake). The WebView2 dashboard loads that file directly.
+This is the WebView2 dashboard shipped with the native application. The root-level legacy dashboard has been removed.
 
-A Vite/React UI was started here but is **not built or used** in V1. Do not add `npm install` to the release path until Method 2 is planned.
+Build and run from the repository root:
 
-When a separate frontend returns:
+```powershell
+cmake -B build -S .
+cmake --build build --config Release
+.\build\Release\Biomes.exe
+```
 
-1. Build to static assets
-2. Copy output beside `Biomes.exe` or load via `WebViewWindow::Initialize`
+The default build copies the frontend and its assets beside the executable, even when only frontend files change. Close an older running instance before testing.
 
-Until then, edit UI in **`/index.html`** at the repo root.
+WebView2 messages connect workspace creation, persistence, activation, closing, deletion and layout repair. Opening the HTML in a browser previews the interface but does not manage desktop workspaces. Existing workspace configuration files are unchanged.

@@ -1,5 +1,6 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <shellapi.h>
 #include <iostream>
 #include <string>
 #include <sstream>
@@ -47,6 +48,7 @@ using json = nlohmann::json;
 
 namespace {
 std::string g_activeBiomeId;
+bool g_recordingHotkey = false;
 bool g_activationInProgress = false;
 
 // Per-zone sticky HWND for the currently active biome (boxId → hwnd).
@@ -637,6 +639,7 @@ bool ToggleBiome(const std::string& biomeId, std::string& status) {
 }
 
 void SyncHotkeysFromDisk() {
+    if (g_recordingHotkey) return;
     std::vector<BiomeProfile> profiles;
     JsonManager::LoadBiomesFromFile(GetBiomesConfigPath().string(), profiles);
     HotkeyManager::SyncBiomeHotkeys(WebViewWindow::GetHwnd(), profiles);
@@ -656,13 +659,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     GridOverlay::SetCompletedCallback([](const std::vector<SelectedBox>& boxes) {
         WebViewWindow::RestoreDashboard();
-        Sleep(100);
+        try {
         json payload;
         payload["action"] = "GRID_LAYOUT_READY";
         payload["boxes"] = json::array();
         for (const auto& box : boxes) payload["boxes"].push_back(SerializeBox(box));
         WebViewWindow::SendMessageToUI(payload.dump());
         WriteRuntimeLog("[APP] GRID_LAYOUT_READY sent with " + std::to_string(boxes.size()) + " boxes");
+        } catch (const std::exception& error) {
+            WriteRuntimeLog(std::string("[APP] Layout handoff failed: ") + error.what());
+            WebViewWindow::SendMessageToUI(R"({"action":"STATUS","payload":"Could not open the save dialog. Your saved biomes are unchanged. Please try creating the layout again."})");
+        }
     });
     GridOverlay::SetCancelledCallback([]() {
         WebViewWindow::RestoreDashboard();
@@ -693,7 +700,42 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             const std::string action = request.value("action", "");
             WriteRuntimeLog("[APP] Action extracted: " + action);
 
-            if (action == "CREATE_NEW_BIOME" || action == "SHOW_DESKTOP") {
+            if (action == "HOTKEY_RECORDING") {
+                g_recordingHotkey = request.value("recording", false);
+                if (g_recordingHotkey) HotkeyManager::Clear(WebViewWindow::GetHwnd());
+                else SyncHotkeysFromDisk();
+            }
+            else if (action == "WINDOW_CONTROL") {
+                const auto command = request.value("command", "");
+                const HWND dashboard = WebViewWindow::GetHwnd();
+                if (command == "minimize") WebViewWindow::MinimizeDashboard();
+                else if (command == "maximize") ShowWindow(dashboard, IsZoomed(dashboard) ? SW_RESTORE : SW_MAXIMIZE);
+                else if (command == "close") PostMessage(dashboard, WM_CLOSE, 0, 0);
+                else if (command == "resize" && !IsZoomed(dashboard)) {
+                    const std::string edge = request.value("edge", "");
+                    const std::unordered_map<std::string, WPARAM> edges = {
+                        {"w", WMSZ_LEFT}, {"e", WMSZ_RIGHT}, {"n", WMSZ_TOP},
+                        {"s", WMSZ_BOTTOM}, {"nw", WMSZ_TOPLEFT}, {"ne", WMSZ_TOPRIGHT},
+                        {"sw", WMSZ_BOTTOMLEFT}, {"se", WMSZ_BOTTOMRIGHT}
+                    };
+                    const auto found = edges.find(edge);
+                    if (found != edges.end()) {
+                        ReleaseCapture();
+                        PostMessage(dashboard, WM_SYSCOMMAND, SC_SIZE | found->second, 0);
+                    }
+                }
+                else if (command == "drag") {
+                    ReleaseCapture();
+                    PostMessage(dashboard, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+                }
+            }
+            else if (action == "OPEN_EXTERNAL") {
+                const auto url = request.value("url", "");
+                if (url.rfind("https://github.com/", 0) == 0 || url.rfind("https://www.reddit.com/", 0) == 0) {
+                    ShellExecuteA(WebViewWindow::GetHwnd(), "open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                }
+            }
+            else if (action == "CREATE_NEW_BIOME" || action == "SHOW_DESKTOP") {
                 WriteRuntimeLog("[APP] CREATE_NEW_BIOME — hide dashboard, fullscreen overlay");
                 WindowScaler::PrepareForOverlayCreate(WebViewWindow::GetHwnd());
                 WebViewWindow::HideDashboard();
@@ -718,7 +760,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                          << "\"hwnd\":" << (uintptr_t)windows[i].hwnd << ","
                          << "\"title\":\"" << EscapeJsonString(windows[i].title) << "\","
                          << "\"process\":\"" << EscapeJsonString(windows[i].processName) << "\","
-                         << "\"path\":\"" << EscapeJsonString(appPath) << "\""
+                         << "\"path\":\"" << EscapeJsonString(appPath) << "\","
+                         << "\"aumid\":\"" << EscapeJsonString(windows[i].aumid) << "\""
                          << "}";
                     if (i + 1 < windows.size()) jsonOut << ",";
                 }
@@ -759,6 +802,32 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                     return;
                 }
 
+                if (!profile.hotkey.empty()) {
+                    UINT modifiers = 0, key = 0;
+                    if (!HotkeyManager::ParseHotkeyString(profile.hotkey, modifiers, key)) {
+                        WebViewWindow::SendMessageToUI(R"({"action":"SAVE_FAILED","payload":"Choose a valid shortcut."})");
+                        return;
+                    }
+                    bool ownsShortcut = false;
+                    for (const auto& existing : profiles) {
+                        UINT oldModifiers = 0, oldKey = 0;
+                        if (!HotkeyManager::ParseHotkeyString(existing.hotkey, oldModifiers, oldKey)) continue;
+                        if (oldModifiers != modifiers || oldKey != key) continue;
+                        if (existing.id != profile.id) {
+                            WebViewWindow::SendMessageToUI(R"({"action":"SAVE_FAILED","payload":"Another biome already uses this shortcut."})");
+                            return;
+                        }
+                        ownsShortcut = true;
+                    }
+                    if (!ownsShortcut) {
+                        constexpr int validationId = 0xBFFE;
+                        if (!RegisterHotKey(WebViewWindow::GetHwnd(), validationId, modifiers | MOD_NOREPEAT, key)) {
+                            WebViewWindow::SendMessageToUI(R"({"action":"SAVE_FAILED","payload":"Windows or another app uses this shortcut. Choose a different one."})");
+                            return;
+                        }
+                        UnregisterHotKey(WebViewWindow::GetHwnd(), validationId);
+                    }
+                }
                 bool replaced = false;
                 for (auto& existing : profiles) {
                     if (existing.id == profile.id) {
@@ -782,7 +851,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
                 SyncHotkeysFromDisk();
                 SendSavedBiomesToUi();
-                WebViewWindow::SendMessageToUI(R"({"action":"BIOME_SAVED"})");
+                WebViewWindow::SendMessageToUI(json({{"action","BIOME_SAVED"},{"id",profile.id}}).dump());
             }
             else if (action == "FIX_BIOME_LAYOUT") {
                 const std::string biomeId = request.value("id", "");
@@ -957,6 +1026,11 @@ SelectedBox DeserializeBox(const json& value) {
 }
 
 void SendSavedBiomesToUi() {
+    std::vector<BiomeProfile> checkedProfiles;
+    if (!JsonManager::LoadBiomesFromFile(GetBiomesConfigPath().string(), checkedProfiles)) {
+        WebViewWindow::SendMessageToUI(R"({"action":"LOAD_FAILED","payload":"Could not read saved biomes. Your file has not been changed."})");
+        return;
+    }
     const std::string biomes = JsonManager::LoadBiomesAsJsonString(GetBiomesConfigPath().string());
     WebViewWindow::SendMessageToUI(
         "{\"action\":\"LOADED_BIOMES\",\"biomes\":" + biomes +

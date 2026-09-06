@@ -56,9 +56,13 @@ void BindWindowToBox(SelectedBox& box, HWND hwnd, const MonitorInfoData& monitor
     box.stableMonitorId = monitor.stableId;
     box.topologyHash = MonitorManager::GetCurrentTopologyHash();
 
-    char title[512];
-    GetWindowTextA(hwnd, title, sizeof(title));
-    box.titleHint = title;
+    wchar_t title[1024]{};
+    const int titleLength = GetWindowTextW(hwnd, title, 1024);
+    const int bytes = WideCharToMultiByte(CP_UTF8, 0, title, titleLength,
+                                         nullptr, 0, nullptr, nullptr);
+    box.titleHint.assign(bytes > 0 ? bytes : 0, '\0');
+    if (bytes > 0) WideCharToMultiByte(CP_UTF8, 0, title, titleLength,
+                                      box.titleHint.data(), bytes, nullptr, nullptr);
 
     box.assignedApp = !identity.processPath.empty() ? identity.processPath : identity.aumid;
     box.exeName = identity.processName;
@@ -262,7 +266,7 @@ bool GridOverlay::ShowOverlayWithLayout(const std::vector<SelectedBox>& existing
 
         SetWindowLongPtr(m.hwndOverlay, GWLP_USERDATA, static_cast<LONG_PTR>(m.index));
         SetLayeredWindowAttributes(m.hwndOverlay, 0, s_theme.bgAlpha, LWA_ALPHA);
-        RegisterHotKey(m.hwndOverlay, HOTKEY_ID, 0, VK_RETURN);
+        RegisterHotKey(m.hwndOverlay, HOTKEY_ID, MOD_NOREPEAT, VK_RETURN);
 
         SetWindowPos(
             m.hwndOverlay,
@@ -483,6 +487,7 @@ LRESULT CALLBACK GridOverlay::WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
 
         case WM_KEYDOWN:
             if (wp == VK_RETURN) {
+                if (lp & (1LL << 30)) return 0;
                 // Same path as hotkey — first Enter = snap mode, second = finish.
                 PostMessage(hwnd, WM_HOTKEY, HOTKEY_ID, 0);
                 return 0;

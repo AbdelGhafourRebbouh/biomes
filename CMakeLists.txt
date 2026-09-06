@@ -24,11 +24,23 @@ target_include_directories(Biomes PRIVATE
 
 target_link_libraries(Biomes PRIVATE ole32 user32 shell32 advapi32 gdi32 dwmapi shcore)
 
-add_custom_command(TARGET Biomes POST_BUILD
+add_custom_target(BiomesAssets ALL
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_SOURCE_DIR}/WebView2Loader.dll
         $<TARGET_FILE_DIR:Biomes>/WebView2Loader.dll
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${CMAKE_SOURCE_DIR}/index.html
+        ${CMAKE_SOURCE_DIR}/frontend/index.html
         $<TARGET_FILE_DIR:Biomes>/index.html
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_SOURCE_DIR}/frontend/app.js
+        ${CMAKE_SOURCE_DIR}/frontend/save-dialog.js
+        ${CMAKE_SOURCE_DIR}/frontend/styles.css
+        $<TARGET_FILE_DIR:Biomes>
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/frontend/assets $<TARGET_FILE_DIR:Biomes>/assets
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/frontend/logo $<TARGET_FILE_DIR:Biomes>/logo
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/frontend/images $<TARGET_FILE_DIR:Biomes>/images
+    DEPENDS Biomes
 )

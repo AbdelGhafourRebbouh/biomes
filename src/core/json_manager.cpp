@@ -241,6 +241,14 @@ std::string JsonManager::LoadBiomesAsJsonString(const std::string& filePath) {
             zoneRefs, profile.topologyHash);
 
         json monitorHealth;
+        // Count unique screens used by the same topology-selected layout as activation.
+        // connectedRequired above counts resolved zones, not screens.
+        std::set<int> openingScreens;
+        for (const auto& box : SelectLayoutForTopology(profile)) {
+            const auto resolved = MonitorManager::ResolveMonitorForBox(ToMonitorBoxRef(box));
+            if (resolved.resolvedIndex >= 0) openingScreens.insert(resolved.resolvedIndex);
+        }
+        monitorHealth["openingScreens"] = openingScreens.size();
         monitorHealth["connected"] = health.connectedMonitors;
         monitorHealth["required"] = health.requiredMonitors;
         monitorHealth["connectedRequired"] = health.connectedRequired;

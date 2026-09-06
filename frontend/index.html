@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <title>biomes</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <main class="app-shell" aria-label="biomes dashboard">
+        <div class="window-chrome" aria-label="Window controls">
+            <button class="chrome-button theme-toggle" type="button" aria-label="Switch to dark mode" aria-pressed="false">
+                <svg class="icon icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2M12 19.5v2M21.5 12h-2M4.5 12h-2M18.72 5.28l-1.42 1.42M6.7 17.3l-1.42 1.42M18.72 18.72 17.3 17.3M6.7 6.7 5.28 5.28" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"/></svg>
+                <svg class="icon icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19.4 15.1A8.3 8.3 0 0 1 8.9 4.6 8.3 8.3 0 1 0 19.4 15.1Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"/></svg>
+            </button>
+            <button class="chrome-button sidebar-toggle" type="button" aria-label="Collapse navigation" aria-expanded="true"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10 5v14" stroke="currentColor" stroke-width="1.8"/></svg></button>
+            <span class="chrome-separator" aria-hidden="true"></span>
+            <button class="chrome-button native-control" type="button" data-window-action="minimize" aria-label="Minimize"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"/></svg></button>
+            <button class="chrome-button native-control" type="button" data-window-action="maximize" aria-label="Maximize"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></button>
+            <button class="chrome-button native-control is-close" type="button" data-window-action="close" aria-label="Close"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"/></svg></button>
+        </div>
+        <aside class="sidebar">
+            <div class="sidebar-top">
+                <a class="brand" href="#biomes" aria-label="biomes home">
+                    <img class="brand-logo brand-logo-dark" src="logo/biomes logo dark.svg" alt="biomes">
+                    <img class="brand-logo brand-logo-light" src="logo/logo biomes white.svg" alt="">
+                    <img class="brand-mini brand-mini-dark" src="logo/dark logo mi.svg" alt="">
+                    <img class="brand-mini brand-mini-light" src="logo/white logo mi.svg" alt="">
+                </a>
+            </div>
+
+            <nav class="navigation" aria-label="Primary navigation">
+                <a class="nav-link is-active" href="#biomes">
+                    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="4" width="6" height="6" rx="1" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="4" y="14" width="6" height="6" rx="1" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="14" width="6" height="6" rx="1" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>
+                    <span>Home</span>
+                </a>
+                <a class="nav-link" href="#insights">
+                    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 18V10M12 18V5M19 18v-7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"/></svg>
+                    <span>Insights</span>
+                </a>
+                <a class="nav-link" href="#customization">
+                    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5 4 4M4 20l4.5-1L20 7.5a2.8 2.8 0 0 0-4-4L4.5 15Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <span>Customization</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-bottom">
+                <div class="sidebar-divider" aria-hidden="true"></div>
+                <nav class="navigation navigation-secondary" aria-label="Support navigation">
+                    <a class="nav-link" href="#developer"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 7-5 5 5 5m8-10 5 5-5 5m-3-13-2 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Developer</span></a>
+                    <a class="nav-link" href="#privacy"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="10" width="12" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8.5 10V7.5a3.5 3.5 0 0 1 7 0V10" fill="none" stroke="currentColor" stroke-width="1.8"/></svg><span>Privacy</span></a>
+                    <a class="nav-link" href="#feedback"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-8l-6 3v-3a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7 9h10M7 13h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span>Feedback</span></a>
+                </nav>
+            </div>
+        </aside>
+
+        <section class="content-frame">
+            <header class="page-header">
+                
+                <h1 id="page-title" tabindex="-1">Your <span class="accent">biomes</span></h1>
+            </header>
+
+            <section class="biome-grid" id="home-page" aria-label="Saved biomes">
+<article class="biome-card">
+                    <div class="cover cover-lilac" aria-label="Violet mountain landscape placeholder"><span class="cover-sun"></span><span class="cover-ridge ridge-back"></span><span class="cover-ridge ridge-front"></span><button class="run-button" type="button" data-biome="Creative studio">Run biome <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/></svg></button></div>
+                    <div class="card-content"><div><h2>Creative studio</h2><p class="hotkey">CTRL + ALT + C</p></div><p class="app-summary">Affinity, Adobe CC, Spotify</p><div class="card-footer"><span class="screen-count"><svg class="map-icon" viewBox="0 0 42 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.2"><rect x="8" y="3" width="26" height="16" rx="2"/><path d="M21 19v3m-6 0h12"/></g></svg><span>1 screen</span></span></div></div>
+                </article>
+
+<button class="create-card" type="button" aria-label="Create a new biome">
+                    <span class="add-icon" aria-hidden="true">+</span>
+                    <span>Create a new<br>biome</span>
+                </button>
+            </section>
+            <section class="empty-page" id="empty-page" aria-labelledby="empty-title" hidden>
+                <p class="brand-slogan">Launch your biome. Trigger your routine.</p>
+                <h2 id="empty-title">Your first routine starts <span class="accent">here.</span></h2>
+                <p>A biome brings your apps and their places together into one saved workspace. Create one for studying, designing, coding, or whatever you want to make room for.</p>
+                <div class="welcome-actions">
+                    <button class="back-home primary-action" id="create-first-biome" type="button">Create your first biome</button>
+                    <button class="back-home" type="button" data-open-guide>Show me how</button>
+                </div>
+                <p class="welcome-hint">Open the apps you want to include before you begin.</p>
+            </section>
+            <section class="coming-page" id="coming-page" aria-labelledby="coming-title" hidden>
+                <div class="coming-banner">
+                    <img src="assets/coming-later.png" alt="" width="2218" height="538">
+                    <h2 id="coming-title">Coming <span class="accent">later</span></h2>
+                </div>
+                <div class="coming-copy">
+                    <p class="coming-kicker">A little more biomes, on the way</p>
+                    <h3 id="feature-title"></h3>
+                    <p id="feature-description"></p>
+                    <a class="back-home" href="#biomes">Back to your biomes <span aria-hidden="true">↗</span></a>
+                </div>
+            </section>
+            <section class="developer-page" id="developer-page" aria-labelledby="developer-heading" hidden>
+                <p class="coming-kicker">Behind biomes</p>
+                <h2 id="developer-heading">Meet the <span class="accent">developer</span></h2>
+                <p>biomes is built independently by <strong>Abdelghafour Rebbouh</strong> to make desktop workspace management effortless, intentional, and completely open.</p>
+                <div class="developer-note">
+                    <h3>Support the Project</h3>
+                    <p>biomes is free and community-driven. If it improves your daily workflow or saves you time, here is how you can support its development:</p>
+                    <ul class="support-options">
+                        <li><strong>Fuel Development</strong><button type="button" class="support-link" disabled title="Link will be added before release">Buy a Ko-fi ☕</button><p>Directly support future updates and independent building.</p></li>
+                        <li><strong>Explore the Code</strong><a class="support-link" href="https://github.com/AbdelGhafourRebbouh/biomes" target="_blank" rel="noopener noreferrer">GitHub Repository ↗</a><p>Star the repo, report issues, or contribute code.</p></li>
+                        <li><strong>Meet the Developer</strong><a class="support-link" href="https://github.com/AbdelGhafourRebbouh" target="_blank" rel="noopener noreferrer">GitHub Profile ↗</a><p>Explore Abdelghafour Rebbouh’s open-source projects.</p></li>
+                        <li><strong>Stay Connected</strong><button type="button" class="support-link" disabled title="Link will be added before release">Visit Website ↗</button><p>Explore portfolio projects and developer notes.</p></li>
+                        <li><strong>Share Thoughts</strong><a class="support-link" href="#feedback">Send Feedback ↗</a><p>Suggest features or report bugs to refine the app.</p></li>
+                    </ul>
+                    <p class="integration-note">Ko-fi and website links will be available before release.</p>
+                </div>
+                <div class="developer-note">
+                    <h3>“Push to Main” Newsletter</h3>
+                    <p>Join the developer newsletter for behind-the-scenes dev logs, open-source project releases, and custom workflow tools crafted for power users.</p>
+                    <div class="newsletter-brand">
+                        <img class="newsletter-logo newsletter-logo-dark" src="logo/push to mian logo dark.svg" alt="Push to Main" width="648" height="372">
+                        <img class="newsletter-logo newsletter-logo-white" src="logo/push to mian logo white.svg" alt="Push to Main" width="648" height="372">
+                    </div>
+                    <div class="newsletter-control">
+                        <div class="newsletter-field">
+                            <label for="newsletter-email">Enter your email address</label>
+                            <input id="newsletter-email" type="email" placeholder="Enter your email address" aria-describedby="newsletter-help newsletter-status" disabled>
+                            <span>Not necessary</span>
+                        </div>
+                        <button type="button" disabled aria-describedby="newsletter-status">Subscribe</button>
+                    </div>
+                    <p id="newsletter-help" class="newsletter-help">Optional — strictly dev updates and major releases. No spam.</p>
+                    <p id="newsletter-status" class="integration-note">Subscriptions are not open yet. No email is collected here.</p>
+                </div>
+                <div class="developer-note">
+                    <h3>100% Open Source, Forever</h3>
+                    <p>biomes is built entirely in the open and <strong>will always remain 100% open source</strong>. There are no paywalls, no background tracking, and no proprietary lock-in—just transparent, lightweight software built for power users.</p>
+                </div>
+                <a class="back-home" href="#biomes">Back to your biomes <span aria-hidden="true">↗</span></a>
+            </section>
+            <section class="feedback-page" id="feedback-page" aria-labelledby="page-title" hidden>
+                <div class="coming-banner">
+                    <img class="soft-banner-image" src="images/image for the banner1.jpg" alt="">
+                    <h2>Open <span class="accent">Community</span></h2>
+                </div>
+                <div class="feedback-badge"><p class="coming-kicker privacy-badge">Built by one, refined by everyone.</p></div>
+                <div class="feedback-grid">
+                    <article class="feedback-card">
+                        <h3>Bug Reports &amp; Code</h3>
+                        <p>Found a bug, crash, or hotkey issue? Open a transparent ticket on GitHub.</p>
+                        <a class="back-home" href="https://github.com/AbdelGhafourRebbouh/biomes/issues" target="_blank" rel="noopener noreferrer">Open GitHub Issue ↗</a>
+                    </article>
+                    <article class="feedback-card">
+                        <h3>Community &amp; Setup Showcase</h3>
+                        <p>Want to share your workspace setup, discuss workflows, or suggest ideas informally? Join our Reddit community.</p>
+                        <a class="back-home" href="https://www.reddit.com/r/biomesApp/" target="_blank" rel="noopener noreferrer">Join r/biomesApp on Reddit ↗</a>
+                    </article>
+                </div>
+            </section>
+            <section class="loading-page" id="loading-page" role="status" aria-label="Loading page" hidden>
+                <div class="loading-blocks" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+                <p id="loading-message">Making room for your <span class="accent">flow</span>…</p><button class="back-home" id="retry-load" type="button">Reload workspaces</button>
+            </section>
+            <p class="live-status" role="status" aria-live="polite"></p>
+            <button class="guide-link" type="button" data-open-guide>How to create a biome</button>
+        </section>
+    </main>
+    <dialog class="creation-guide" aria-labelledby="guide-title">
+        <form method="dialog"><button class="guide-close" aria-label="Close guide" autofocus>×</button></form>
+        <p class="brand-slogan">Launch your biome. Trigger your routine.</p>
+        <h2 id="guide-title">Make room for your <span class="accent">routine.</span></h2>
+        <ol class="guide-steps">
+            <li><strong>Open your apps.</strong><p>Have the apps you want in your biome open and ready.</p></li>
+            <li><strong>Draw their spaces.</strong><p>Choose Create biome, draw zones on your screen, then press <kbd>Enter</kbd>.</p></li>
+            <li><strong>Place your apps.</strong><p>Drag each app into its zone, then press <kbd>Enter</kbd> again.</p></li>
+            <li><strong>Make it yours.</strong><p>Give your biome a name, optionally add a shortcut and cover, then save.</p></li>
+        </ol>
+        <p>Next time, launch your biome from its card or shortcut.</p>
+        <form method="dialog"><button class="back-home primary-action">Got it</button></form>
+    </dialog>
+    <dialog class="save-dialog" id="save-dialog" aria-labelledby="save-title" aria-describedby="save-intro">
+        <form id="save-form">
+            <button class="guide-close" id="save-close" type="button" aria-label="Close save dialog">×</button>
+            <p class="brand-slogan">Launch your biome. Trigger your routine.</p>
+            <h2 id="save-title">Make it <span class="accent">yours.</span></h2>
+            <p id="save-intro">Your layout is ready. Give it a name and a little personality.</p>
+            <p id="save-preview-note" class="save-help"></p>
+            <div class="save-layout">
+                <div class="save-visual">
+                    <div class="save-cover" id="save-cover">
+                        <div class="layout-placeholder" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+                        <img id="save-image-preview" alt="Selected biome cover" hidden>
+                    </div>
+                    <div class="image-actions">
+                        <button class="save-pill" id="choose-cover" type="button" aria-haspopup="dialog" aria-controls="cover-picker">Choose image</button>
+                        <button class="save-text-button" id="remove-cover" type="button" hidden>Remove</button>
+                    </div>
+                    <p class="save-help">Choose a default or upload a JPG, PNG or WebP. Large uploads are optimized for your cover.</p>
+                </div>
+                <div class="save-fields">
+                    <label for="biome-name">biome name</label>
+                    <input id="biome-name" maxlength="80" required placeholder="e.g. Creative flow" autocomplete="off">
+                    <label for="shortcut-record">Shortcut <span class="save-help">— optional</span></label>
+                    <button id="shortcut-record" class="shortcut-record" type="button" aria-pressed="false" aria-describedby="shortcut-help">Press to record a shortcut</button>
+                    <p id="shortcut-help" class="save-help" role="status">Choose a suggestion or record Ctrl + Alt + a letter.</p>
+                    <div class="shortcut-options" aria-label="Shortcut suggestions">
+                        <button type="button" data-shortcut="CTRL+ALT+B">Ctrl + Alt + B</button>
+                        <button type="button" data-shortcut="CTRL+ALT+G">Ctrl + Alt + G</button>
+                        <button type="button" id="clear-shortcut">No shortcut</button>
+                    </div>
+                    <p class="save-help">A shortcut can launch or close your biome. Availability in other apps must be checked by Windows.</p>
+                </div>
+            </div>
+            <details class="save-zones"><summary>Review your layout <span id="zone-count"></span></summary><ul id="save-zone-list"></ul></details>
+            <p id="save-error" class="save-error" role="alert"></p>
+            <p id="save-progress" class="save-help" role="status"></p>
+            <div class="save-actions">
+                <button class="back-home" id="save-cancel" type="button">Close for now</button>
+                <button class="save-pill" id="save-submit" type="submit">Save biome</button>
+            </div>
+        </form>
+    </dialog>
+    <dialog class="save-dialog delete-dialog" id="delete-dialog" aria-labelledby="delete-title" aria-describedby="delete-description">
+        <h2 id="delete-title">Delete this <span class="accent">biome?</span></h2>
+        <p id="delete-description"></p><p id="delete-error" class="save-error" role="alert"></p>
+        <p class="save-help">Your apps and files won't be deleted.</p>
+        <div class="save-actions">
+            <button class="back-home" id="keep-biome" type="button" autofocus>Keep biome</button>
+            <button class="save-pill delete-confirm" id="confirm-delete" type="button">Delete biome</button>
+        </div>
+    </dialog>
+    <dialog id="cover-picker" class="save-dialog cover-picker" aria-labelledby="cover-picker-title">
+        <form method="dialog"><button class="guide-close" type="submit" aria-label="Close image picker" autofocus>×</button></form>
+        <h2 id="cover-picker-title">Choose your <span class="accent">cover.</span></h2>
+        <p class="save-help">Pick a default image or upload one from your device.</p>
+        <div id="default-covers" class="default-covers" aria-label="Default cover images"></div>
+        <input id="cover-file" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+        <button class="back-home" id="upload-cover" type="button">Upload from your device</button>
+        <p id="cover-status" class="save-help" role="status"></p>
+        <form method="dialog" class="save-actions"><button class="save-pill" type="submit">Done</button></form>
+    </dialog>
+    <template id="biome-card-template">
+                <article class="biome-card">
+                    <div class="cover cover-amber" aria-label="Warm mountain landscape placeholder"><span class="cover-sun"></span><span class="cover-ridge ridge-back"></span><span class="cover-ridge ridge-front"></span><button class="run-button" type="button" data-biome="Focus flow">Run biome <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/></svg></button></div>
+                    <div class="card-content"><div><h2>Focus flow</h2><p class="hotkey">CTRL + ALT + F</p></div><p class="app-summary">VS Code, Obsidian, Chrome</p><div class="card-footer"><span class="screen-count"><svg class="map-icon" viewBox="0 0 42 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.2"><rect x="2" y="4" width="17" height="13" rx="2"/><rect x="23" y="4" width="17" height="13" rx="2"/><path d="M10 17v3m-4 0h8m17-3v3m-4 0h8"/></g></svg><span>2 screens</span></span></div></div>
+                </article>
+    </template>
+    <script src="app.js"></script>
+    <script src="save-dialog.js"></script>
+</body>
+</html>
