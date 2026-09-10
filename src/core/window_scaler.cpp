@@ -2,6 +2,7 @@
 #include "../../include/core/monitor_manager.hpp"
 #include "../../include/core/app_launcher.hpp"
 #include "../../include/core/launch_progress.hpp"
+#include "../../include/core/app_paths.hpp"
 #include "../../include/ui/grid_overlay.hpp"
 #include "../../include/ui/webview_window.hpp"
 
@@ -201,7 +202,7 @@ std::function<void(const std::string&)> g_progressCallback;
 ULONGLONG g_lastScan = 0;
 
 void TrackerLog(const string& message) {
-    ofstream log("config/biomes_runtime.log", ios::app);
+    ofstream log(biomes::AppPaths::RuntimeLog(), ios::app);
     if (log) log << "[TRACKER] " << GetTickCount64() << " " << message << endl;
 }
 

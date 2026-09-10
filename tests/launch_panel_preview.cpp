@@ -1,5 +1,6 @@
 #define NOMINMAX
 #include "../include/ui/launch_panel.hpp"
+#include "../include/core/app_paths.hpp"
 #include "../include/external/nlohmann/json.hpp"
 #include <shellapi.h>
 #include <filesystem>
@@ -8,6 +9,8 @@ std::wstring capturePath;
 
 // Isolated visual harness: never loads saved biomes or starts personal apps.
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR arguments, int) {
+    biomes::AppPaths::InitializeForTests(std::filesystem::temp_directory_path() /
+        (L"biomes-panel-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64())));
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     if (FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) return 1;
     LaunchPanel::Initialize(nullptr);

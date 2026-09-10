@@ -12,6 +12,7 @@
 
 #include <WebView2.h>
 #include "../../include/ui/webview_window.hpp"
+#include "../../include/core/app_paths.hpp"
 #include "../../resources/resource.h"
 
 namespace {
@@ -206,7 +207,7 @@ void WebViewWindow::InitWebView(const std::string& startUrl) {
         return;
     }
 
-    std::wstring userDataFolder = L"webview_data";
+    const std::wstring userDataFolder = biomes::AppPaths::WebViewData().wstring();
 
     auto envHandler = CreateCallbackRaw<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
         [startUrl](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {

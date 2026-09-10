@@ -115,6 +115,8 @@ bool MonitorManager::GetWorkAreaForBox(int index, const std::string& device, con
 void WebViewWindow::SendMessageToUI(const std::string& message) { fixture::statuses.push_back(message); }
 
 int main() {
+    biomes::AppPaths::InitializeForTests(std::filesystem::temp_directory_path() /
+        (L"biomes-stability-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64())));
     using namespace fixture;
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);

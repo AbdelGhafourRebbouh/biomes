@@ -11,6 +11,8 @@ add_executable(Biomes WIN32
     src/main.cpp
     src/core/hotkey_manager.cpp
     src/core/json_manager.cpp
+    src/core/app_paths.cpp
+    src/core/legacy_data_migration.cpp
     src/core/monitor_manager.cpp
     src/core/window_scaler.cpp
     src/core/app_launcher.cpp
@@ -37,15 +39,23 @@ endif()
 option(BIOMES_BUILD_TESTS "Build isolated native stability regression tests" OFF)
 if(BIOMES_BUILD_TESTS)
     enable_testing()
-    add_executable(BiomesStabilityTests tests/stability_tests.cpp src/core/app_launcher.cpp)
+    add_executable(BiomesStabilityTests tests/stability_tests.cpp src/core/app_launcher.cpp src/core/app_paths.cpp)
+    target_compile_definitions(BiomesStabilityTests PRIVATE BIOMES_STORAGE_TESTING)
     target_include_directories(BiomesStabilityTests PRIVATE include include/external/webview2)
     target_link_libraries(BiomesStabilityTests PRIVATE ole32 user32 shell32 advapi32 gdi32 dwmapi shcore)
     add_test(NAME stability_regressions COMMAND BiomesStabilityTests)
     set_tests_properties(stability_regressions PROPERTIES TIMEOUT 90)
-    add_executable(BiomesPanelPreview WIN32 tests/launch_panel_preview.cpp src/ui/launch_panel.cpp)
+    add_executable(BiomesPanelPreview WIN32 tests/launch_panel_preview.cpp src/ui/launch_panel.cpp src/core/app_paths.cpp)
     target_include_directories(BiomesPanelPreview PRIVATE include include/external/webview2)
-    target_compile_definitions(BiomesPanelPreview PRIVATE BIOMES_PANEL_TESTING)
+    target_compile_definitions(BiomesPanelPreview PRIVATE BIOMES_PANEL_TESTING BIOMES_STORAGE_TESTING)
     target_link_libraries(BiomesPanelPreview PRIVATE ole32 user32 shell32 dcomp shlwapi)
+    add_executable(BiomesStorageTests tests/storage_tests.cpp src/core/app_paths.cpp src/core/legacy_data_migration.cpp)
+    target_include_directories(BiomesStorageTests PRIVATE include)
+    target_compile_definitions(BiomesStorageTests PRIVATE BIOMES_STORAGE_TESTING)
+    target_link_libraries(BiomesStorageTests PRIVATE ole32 shell32)
+    foreach(scenario paths migrate existing invalid locked once wrongtype)
+        add_test(NAME storage_${scenario} COMMAND BiomesStorageTests ${scenario})
+    endforeach()
 endif()
 
 add_custom_target(BiomesAssets ALL

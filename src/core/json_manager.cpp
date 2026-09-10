@@ -150,7 +150,7 @@ void EnrichBoxMonitorFields(SelectedBox& box) {
 
 } // namespace
 
-bool JsonManager::SaveBiomesToFile(const std::string& filePath, const std::vector<BiomeProfile>& profiles) {
+bool JsonManager::SaveBiomesToFile(const std::filesystem::path& filePath, const std::vector<BiomeProfile>& profiles) {
     json root;
     root["version"] = 3;
     root["biomes"] = json::array();
@@ -159,7 +159,8 @@ bool JsonManager::SaveBiomesToFile(const std::string& filePath, const std::vecto
     }
 
     const std::filesystem::path target(filePath);
-    const std::filesystem::path temporary = target.string() + ".tmp";
+    std::filesystem::path temporary = target;
+    temporary += L".tmp";
     if (!target.parent_path().empty()) {
         std::error_code directoryError;
         std::filesystem::create_directories(target.parent_path(), directoryError);
@@ -176,18 +177,20 @@ bool JsonManager::SaveBiomesToFile(const std::string& filePath, const std::vecto
     if (!file.good()) return false;
     file.close();
 
-    if (!MoveFileExA(temporary.string().c_str(), target.string().c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    if (!MoveFileExW(temporary.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
         std::cerr << "[JSON] Failed to replace " << target << " (Win32 error " << GetLastError() << ")." << std::endl;
         return false;
     }
     return true;
 }
 
-bool JsonManager::LoadBiomesFromFile(const std::string& filePath, std::vector<BiomeProfile>& outProfiles) {
+bool JsonManager::LoadBiomesFromFile(const std::filesystem::path& filePath, std::vector<BiomeProfile>& outProfiles) {
     outProfiles.clear();
     std::ifstream file(filePath);
     if (!file.is_open()) {
-        return true;
+        std::error_code error;
+        const bool exists = std::filesystem::exists(filePath, error);
+        return !exists && !error;
     }
 
     try {
@@ -208,7 +211,7 @@ bool JsonManager::LoadBiomesFromFile(const std::string& filePath, std::vector<Bi
     return true;
 }
 
-std::string JsonManager::LoadBiomesAsJsonString(const std::string& filePath) {
+std::string JsonManager::LoadBiomesAsJsonString(const std::filesystem::path& filePath) {
     std::vector<BiomeProfile> profiles;
     if (!LoadBiomesFromFile(filePath, profiles)) {
         return "[]";

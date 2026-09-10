@@ -21,6 +21,8 @@
 #include "../include/core/json_manager.hpp"
 #include "../include/core/hotkey_manager.hpp"
 #include "../include/core/app_launcher.hpp"
+#include "../include/core/app_paths.hpp"
+#include "../include/core/legacy_data_migration.hpp"
 
 using json = nlohmann::json;
 
@@ -64,8 +66,7 @@ constexpr int kExeOnlyScore = 10;
 }
 
 void WriteRuntimeLog(const std::string& message) {
-    CreateDirectoryA("config", nullptr);
-    std::ofstream log("config/biomes_runtime.log", std::ios::app);
+    std::ofstream log(biomes::AppPaths::RuntimeLog(), std::ios::app);
     if (log.is_open()) {
         log << message << std::endl;
     }
@@ -395,7 +396,7 @@ bool ActivateBiome(const std::string& biomeId, std::string& status) {
     } activationGuard;
 
     std::vector<BiomeProfile> profiles;
-    if (!JsonManager::LoadBiomesFromFile(GetBiomesConfigPath().string(), profiles)) {
+    if (!JsonManager::LoadBiomesFromFile(GetBiomesConfigPath(), profiles)) {
         g_activationInProgress = false;
         status = "Could not read saved Biomes.";
         return false;
@@ -612,11 +613,20 @@ bool ToggleBiome(const std::string& biomeId, std::string& status) {
 void SyncHotkeysFromDisk() {
     if (g_recordingHotkey) return;
     std::vector<BiomeProfile> profiles;
-    JsonManager::LoadBiomesFromFile(GetBiomesConfigPath().string(), profiles);
+    JsonManager::LoadBiomesFromFile(GetBiomesConfigPath(), profiles);
     HotkeyManager::SyncBiomeHotkeys(WebViewWindow::GetHwnd(), profiles);
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    try {
+        biomes::AppPaths::Initialize();
+        biomes::MigrateLegacyData(biomes::AppPaths::ExecutableDirectory());
+    } catch (const std::exception&) {
+        MessageBoxW(nullptr,
+            L"biomes could not initialize or migrate local storage. Close other biomes instances and check folder permissions. Existing files have not been overwritten.",
+            L"biomes", MB_OK | MB_ICONERROR);
+        return 1;
+    }
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     const HRESULT apartment = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     if (FAILED(apartment)) {
@@ -785,7 +795,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
                 std::vector<BiomeProfile> profiles;
                 const auto configPath = GetBiomesConfigPath();
-                if (!JsonManager::LoadBiomesFromFile(configPath.string(), profiles)) {
+                if (!JsonManager::LoadBiomesFromFile(configPath, profiles)) {
                     WebViewWindow::SendMessageToUI(R"({"action":"STATUS","payload":"Could not read saved Biomes."})");
                     return;
                 }
@@ -832,7 +842,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                 }
 
                 std::filesystem::create_directories(configPath.parent_path());
-                if (!JsonManager::SaveBiomesToFile(configPath.string(), profiles)) {
+                if (!JsonManager::SaveBiomesToFile(configPath, profiles)) {
                     WebViewWindow::SendMessageToUI(R"({"action":"STATUS","payload":"Could not save this Biome."})");
                     return;
                 }
@@ -849,7 +859,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                 }
 
                 std::vector<BiomeProfile> profiles;
-                if (!JsonManager::LoadBiomesFromFile(GetBiomesConfigPath().string(), profiles)) {
+                if (!JsonManager::LoadBiomesFromFile(GetBiomesConfigPath(), profiles)) {
                     WebViewWindow::SendMessageToUI(R"({"action":"STATUS","payload":"Could not read saved Biomes."})");
                     return;
                 }
@@ -884,7 +894,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
                 std::vector<BiomeProfile> profiles;
                 const auto configPath = GetBiomesConfigPath();
-                if (!JsonManager::LoadBiomesFromFile(configPath.string(), profiles)) {
+                if (!JsonManager::LoadBiomesFromFile(configPath, profiles)) {
                     WebViewWindow::SendMessageToUI(R"({"action":"STATUS","payload":"Could not read saved Biomes."})");
                     return;
                 }
@@ -907,7 +917,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                     ClearStickyHwnds();
                 }
 
-                if (!JsonManager::SaveBiomesToFile(configPath.string(), profiles)) {
+                if (!JsonManager::SaveBiomesToFile(configPath, profiles)) {
                     WebViewWindow::SendMessageToUI(R"({"action":"STATUS","payload":"Could not delete this Biome."})");
                     return;
                 }
@@ -967,9 +977,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 }
 
 std::filesystem::path GetBiomesConfigPath() {
-    char buffer[MAX_PATH];
-    GetModuleFileNameA(NULL, buffer, MAX_PATH);
-    return std::filesystem::path(buffer).parent_path() / "config" / "biomes.json";
+    return biomes::AppPaths::BiomesFile();
 }
 
 json SerializeBox(const SelectedBox& box) {
@@ -1019,11 +1027,11 @@ SelectedBox DeserializeBox(const json& value) {
 
 void SendSavedBiomesToUi() {
     std::vector<BiomeProfile> checkedProfiles;
-    if (!JsonManager::LoadBiomesFromFile(GetBiomesConfigPath().string(), checkedProfiles)) {
+    if (!JsonManager::LoadBiomesFromFile(GetBiomesConfigPath(), checkedProfiles)) {
         WebViewWindow::SendMessageToUI(R"({"action":"LOAD_FAILED","payload":"Could not read saved biomes. Your file has not been changed."})");
         return;
     }
-    const std::string biomes = JsonManager::LoadBiomesAsJsonString(GetBiomesConfigPath().string());
+    const std::string biomes = JsonManager::LoadBiomesAsJsonString(GetBiomesConfigPath());
     WebViewWindow::SendMessageToUI(
         "{\"action\":\"LOADED_BIOMES\",\"biomes\":" + biomes +
         ",\"activeId\":\"" + EscapeJsonString(g_activeBiomeId) + "\"}"

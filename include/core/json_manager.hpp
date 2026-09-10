@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <filesystem>
 #include <vector>
 #include <unordered_map>
 #include "../ui/grid_overlay.hpp"
@@ -18,11 +19,11 @@ struct BiomeProfile {
 class JsonManager {
 public:
     // Collection API used by the dashboard. A single file contains every saved Biome.
-    static bool SaveBiomesToFile(const std::string& filePath, const std::vector<BiomeProfile>& profiles);
-    static bool LoadBiomesFromFile(const std::string& filePath, std::vector<BiomeProfile>& outProfiles);
+    static bool SaveBiomesToFile(const std::filesystem::path& filePath, const std::vector<BiomeProfile>& profiles);
+    static bool LoadBiomesFromFile(const std::filesystem::path& filePath, std::vector<BiomeProfile>& outProfiles);
 
     // Compact dashboard-safe representation: id, name, hotkey, cover, apps, monitor health.
-    static std::string LoadBiomesAsJsonString(const std::string& filePath);
+    static std::string LoadBiomesAsJsonString(const std::filesystem::path& filePath);
 
     // Fill stableMonitorId/topologyHash and store layout variant for current topology.
     static void EnrichProfileForSave(BiomeProfile& profile);

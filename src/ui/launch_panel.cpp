@@ -1,5 +1,6 @@
 #define NOMINMAX
 #include "../../include/ui/launch_panel.hpp"
+#include "../../include/core/app_paths.hpp"
 #include "../../include/external/webview2/WebView2.h"
 #include "../../include/external/nlohmann/json.hpp"
 #include <dcomp.h>
@@ -72,7 +73,7 @@ std::string Utf8(const wchar_t* text) {
     return result;
 }
 void Log(const char* stage, HRESULT hr) {
-    std::ofstream file("config/biomes_runtime.log", std::ios::app);
+    std::ofstream file(biomes::AppPaths::RuntimeLog(), std::ios::app);
     file << "[LAUNCH PANEL] " << stage << " HRESULT=" << std::hex << static_cast<unsigned long>(hr) << '\n';
 }
 void Post(const json& message) {
@@ -257,7 +258,7 @@ void LaunchPanel::Initialize(HWND dashboard) {
         hr = environment3->CreateCoreWebView2CompositionController(panelWindow, completed);
         completed->Release(); environment3->Release(); return hr;
     });
-    const auto profile = std::filesystem::absolute(L"webview_data").wstring();
+    const auto profile = biomes::AppPaths::WebViewData().wstring();
     hr = create(nullptr, profile.c_str(), nullptr, handler); handler->Release();
     if (FAILED(hr)) Log("environment request", hr);
 }
