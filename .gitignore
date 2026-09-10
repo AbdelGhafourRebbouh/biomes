@@ -4,6 +4,8 @@ frontend/dist/
 
 # C++ Build artifacts, Object files & Executables
 build/
+build-release/
+build-stability/
 bin/
 obj/
 out/
@@ -36,7 +38,9 @@ pdf_extract.txt
 webview_data/
 
 # Runtime logs & local biome data
+logs/
 *.log
+*.old
 config/biomes_runtime.log
 **/config/biomes.json
 **/config/biomes.json.tmp

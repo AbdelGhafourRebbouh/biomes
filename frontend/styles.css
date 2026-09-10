@@ -6,16 +6,19 @@
 
 :root {
     color-scheme:light;
+    --selection-bg:#515151; --selection-text:#FFFFFF;
     --bg-primary:#FFFFFF; --bg-edge:#F2F2F2; --border-divider:#E0E0E3; --text-primary:#222222;
     --text-muted:#77777b; --card-surface:#fff; --card-text:#222; --card-muted:#727276; --card-border:#ececec; --screen-surface:#f6f6f6;
     --hover:rgba(34,34,34,.055); --motion:500ms; --ease:cubic-bezier(.25,.1,.25,1);
 }
 [data-theme="dark"] {
     color-scheme:dark;
+    --selection-bg:#F2F2F2; --selection-text:#232323;
     --bg-primary:#232323; --bg-edge:#333333; --border-divider:#1A1A1A; --text-primary:#FFFFFF;
     --text-muted:#b5b5ba; --card-surface:#333333; --card-text:#FFFFFF; --card-muted:#c2c2c7; --card-border:#484848; --screen-surface:#292929; --hover:rgba(255,255,255,.08);
 }
 * { box-sizing:border-box; }
+::selection { background-color:var(--selection-bg); color:var(--selection-text); text-shadow:none; }
 body { margin:0; padding:0; min-width:360px; background:var(--bg-edge); color:var(--text-primary); font-family:"General Sans",Arial,sans-serif; }
 button,a { font:inherit; -webkit-tap-highlight-color:transparent; }
 button { color:inherit; cursor:pointer; }
@@ -213,13 +216,18 @@ h1 { margin:0; font:500 24px/1.2 "Fredoka",sans-serif; letter-spacing:-.4px; }
 .newsletter-logo-white { display:none; }
 [data-theme="dark"] .newsletter-logo-dark { display:none; }
 [data-theme="dark"] .newsletter-logo-white { display:block; }
-.newsletter-control { display:flex; margin-top:22px; overflow:hidden; border:1.5px solid var(--text-primary); border-radius:22px; background:var(--bg-primary); }
+.developer-note .newsletter-optional { margin:22px 0 6px 16px; color:var(--text-muted); font-size:11px; }
+.newsletter-control { display:flex; min-height:62px; margin:0; overflow:hidden; border:1.5px solid var(--text-primary); border-radius:22px; background:var(--bg-primary); }
+.newsletter-control[hidden],.newsletter-success[hidden] { display:none; }
+.newsletter-success { display:grid; place-items:center; min-height:62px; box-sizing:border-box; margin-top:22px; padding:16px; border:1.5px solid var(--text-primary); border-radius:22px; background:var(--text-primary); color:var(--bg-primary); font-size:16px; font-weight:500; text-align:center; }
+.newsletter-success:focus-visible { outline:2px solid var(--text-primary); outline-offset:3px; }
 .newsletter-field { flex:1; min-width:0; padding:14px 16px; display:flex; flex-direction:column; justify-content:center; }
 .newsletter-field label { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
-.newsletter-field input { width:100%; min-width:0; padding:0; border:0; background:transparent; color:var(--text-primary); font:400 13px "General Sans",sans-serif; opacity:1; -webkit-text-fill-color:var(--text-muted); }
+.newsletter-field input { width:100%; min-width:0; padding:0; border:0; outline:none; box-shadow:none; background:transparent; color:var(--text-primary); font:400 13px "General Sans",sans-serif; opacity:1; -webkit-text-fill-color:var(--text-primary); }
 .newsletter-field input::placeholder { color:var(--text-muted); opacity:1; }
-.newsletter-field span { margin-top:2px; color:var(--text-muted); font-size:10px; }
-.newsletter-control > button { align-self:stretch; padding:16px 24px; border:0; border-left:1px solid var(--text-primary); background:var(--text-primary); color:var(--bg-primary); font-size:15px; font-weight:500; opacity:1; cursor:not-allowed; }
+.newsletter-control > button { align-self:stretch; padding:16px 24px; border:0; border-left:1px solid var(--text-primary); background:var(--text-primary); color:var(--bg-primary); font-size:15px; font-weight:500; opacity:1; cursor:pointer; }
+.newsletter-control > button:disabled { cursor:wait; }
+.newsletter-control:focus-within { outline:2px solid var(--text-primary); outline-offset:3px; }
 .developer-note .newsletter-help,.developer-note .integration-note { font-size:11px; line-height:1.6; }
 .privacy-badge { display:inline-block; padding:6px 12px; border:1px solid var(--border-divider); border-radius:999px; background:var(--bg-edge); }
 @container (max-width:440px) {

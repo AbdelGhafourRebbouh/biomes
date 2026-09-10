@@ -14,6 +14,7 @@
 #include "../include/external/nlohmann/json.hpp"
 
 #include "../include/ui/webview_window.hpp"
+#include "../include/ui/launch_panel.hpp"
 #include "../include/core/window_scaler.hpp"
 #include "../include/ui/grid_overlay.hpp"
 #include "../include/core/monitor_manager.hpp"
@@ -381,6 +382,17 @@ bool ActivateBiome(const std::string& biomeId, std::string& status) {
         return false;
     }
     g_activationInProgress = true;
+    WindowScaler::PauseLaunchTracking(true);
+    struct ActivationGuard {
+        int exceptions = std::uncaught_exceptions();
+        ~ActivationGuard() {
+            g_activationInProgress = false;
+            WindowScaler::PauseLaunchTracking(false);
+            if (std::uncaught_exceptions() > exceptions) {
+                WindowScaler::CancelPendingLaunches();
+            }
+        }
+    } activationGuard;
 
     std::vector<BiomeProfile> profiles;
     if (!JsonManager::LoadBiomesFromFile(GetBiomesConfigPath().string(), profiles)) {
@@ -406,6 +418,7 @@ bool ActivateBiome(const std::string& biomeId, std::string& status) {
     }
 
     const std::vector<SelectedBox> layout = JsonManager::SelectLayoutForTopology(*profile);
+    WindowScaler::BeginLaunchProgress(profile->name, layout);
 
     std::vector<WindowInfo> activeWindows = WindowScaler::GetActiveWindows();
     std::unordered_set<HWND> keepVisible;
@@ -429,9 +442,7 @@ bool ActivateBiome(const std::string& biomeId, std::string& status) {
 
     WebViewWindow::MinimizeDashboard();
     WindowScaler::PrepareCleanSlate(WebViewWindow::GetHwnd(), keepVisible);
-    PumpUiMessagesBriefly();
-    Sleep(80);
-    PumpUiMessagesBriefly();
+    // Pending placement resumes when activation returns to the owner message loop.
 
     activeWindows = WindowScaler::GetActiveWindows();
     std::unordered_set<HWND> usedWindows;
@@ -455,6 +466,7 @@ bool ActivateBiome(const std::string& biomeId, std::string& status) {
 
         std::string skipReason;
         if (!ResolveZoneMonitor(box, box.monitorIndex, skipReason)) {
+            WindowScaler::ReportLaunchState(box, "skipped", "Monitor disconnected.");
             ++skippedMonitor;
             zoneNotes.push_back(ExpectedExe(box) + ": skipped (" + skipReason + ")");
             continue;
@@ -463,6 +475,7 @@ bool ActivateBiome(const std::string& biomeId, std::string& status) {
         const std::string label = !ExpectedExe(box).empty() ? ExpectedExe(box) : box.assignedApp;
 
         if (WindowScaler::IsUnsupportedUwpBinding(box.assignedApp)) {
+            WindowScaler::ReportLaunchState(box, "failed", "Recreate this zone with the actual Store app open.");
             ++skippedUwp;
             ++failed;
             zoneNotes.push_back(label + ": skipped (UWP/ApplicationFrameHost)");
@@ -483,6 +496,7 @@ bool ActivateBiome(const std::string& biomeId, std::string& status) {
             } else {
                 ++failed;
                 zoneNotes.push_back(label + ": snap failed");
+                WindowScaler::ReportLaunchState(box, "failed", "Could not request window placement.");
             }
             continue;
         }
@@ -498,11 +512,13 @@ bool ActivateBiome(const std::string& biomeId, std::string& status) {
             if (match.sameExeCount > 0) {
                 ++failed;
                 zoneNotes.push_back(label + ": open the correct vault first (title must match)");
+                WindowScaler::ReportLaunchState(box, "failed", "Open the correct Obsidian vault first.");
                 continue;
             }
             if (resolvedUri.empty()) {
                 ++failed;
                 zoneNotes.push_back(label + ": recreate zone with vault open (no vault resolved)");
+                WindowScaler::ReportLaunchState(box, "failed", "Recreate this zone with the Obsidian vault open.");
                 continue;
             }
             box.launchUri = resolvedUri;
@@ -511,6 +527,7 @@ bool ActivateBiome(const std::string& biomeId, std::string& status) {
         // Packaged/Store app without resolvable AUMID — skip instead of blocking error dialog.
         if ((AppLauncher::IsPackagedAppPath(box.assignedApp) || !box.aumid.empty()) &&
             AppLauncher::ResolveAumidCandidates(box).empty()) {
+            WindowScaler::ReportLaunchState(box, "failed", "Store app identity unavailable; recreate its zone.");
             ++failed;
             zoneNotes.push_back(label + ": Store app — recreate zone while app is open");
             continue;
@@ -535,58 +552,12 @@ bool ActivateBiome(const std::string& biomeId, std::string& status) {
         } else {
             ++failed;
             zoneNotes.push_back(label + ": failed to launch (" + launchError + ")");
+            WindowScaler::ReportLaunchState(box, "failed", "Could not launch this app. Check the local runtime log.");
         }
     }
 
-    // Settle pass: re-snap if iconic, wrong monitor, still fullscreen, or far from target.
-    if (!placedPairs.empty()) {
-        PumpUiMessagesBriefly();
-        Sleep(80);
-        PumpUiMessagesBriefly();
-        for (const auto& entry : placedPairs) {
-            HWND hwnd = entry.first;
-            const SelectedBox& box = entry.second;
-            if (!hwnd || !IsWindow(hwnd)) continue;
-
-            RECT current{};
-            RECT work{};
-            bool needsResnap = IsIconic(hwnd) != FALSE;
-            if (GetWindowRect(hwnd, &current)) {
-                HMONITOR mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-                MONITORINFO mi{};
-                mi.cbSize = sizeof(mi);
-                if (GetMonitorInfo(mon, &mi)) {
-                    const int monArea = (mi.rcMonitor.right - mi.rcMonitor.left) *
-                                        (mi.rcMonitor.bottom - mi.rcMonitor.top);
-                    const int winArea = (current.right - current.left) *
-                                        (current.bottom - current.top);
-                    if (monArea > 0 && winArea >= static_cast<int>(monArea * 0.85)) {
-                        needsResnap = true; // still maximized/fullscreen-sized
-                    }
-                }
-                if (MonitorManager::GetWorkAreaForBox(box.monitorIndex, box.monitorDevice, box.stableMonitorId, work)) {
-                    const LONG cx = (current.left + current.right) / 2;
-                    const LONG cy = (current.top + current.bottom) / 2;
-                    if (cx < work.left || cx >= work.right || cy < work.top || cy >= work.bottom) {
-                        needsResnap = true;
-                    }
-                    const int tw = work.right - work.left;
-                    const int th = work.bottom - work.top;
-                    const int expectedW = static_cast<int>(box.relWidth * tw);
-                    const int expectedH = static_cast<int>(box.relHeight * th);
-                    const int aw = current.right - current.left;
-                    const int ah = current.bottom - current.top;
-                    if (std::abs(aw - expectedW) > 80 || std::abs(ah - expectedH) > 80) {
-                        needsResnap = true;
-                    }
-                }
-            }
-            if (needsResnap) {
-                WindowScaler::ForceSnapToBox(hwnd, box);
-            }
-            PumpUiMessagesBriefly();
-        }
-    }
+    // Placement is verified asynchronously; never toggle fullscreen based on window area.
+    WindowScaler::FinishLaunchSetup();
 
     WindowScaler::RaiseBiomeWindows(placedBiomeHwnds);
     WindowScaler::MinimizeExceptPlaced(placedBiomeHwnds, WebViewWindow::GetHwnd());
@@ -603,7 +574,7 @@ bool ActivateBiome(const std::string& biomeId, std::string& status) {
 
     std::ostringstream summary;
     if (placed > 0 || pendingLaunches > 0) {
-        summary << "Biome opened: " << placed << "/" << totalZones << " placed";
+        summary << "Biome opening: " << placed << "/" << totalZones << " placement requests accepted";
     } else {
         summary << "Biome launch failed: 0/" << totalZones << " placed";
     }
@@ -647,6 +618,12 @@ void SyncHotkeysFromDisk() {
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    const HRESULT apartment = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    if (FAILED(apartment)) {
+        MessageBoxW(nullptr, L"Could not initialize the desktop COM apartment.", L"biomes", MB_OK | MB_ICONERROR);
+        return 1;
+    }
+    struct ComApartmentGuard { ~ComApartmentGuard() { CoUninitialize(); } } comApartmentGuard;
 
 #ifdef _DEBUG
     AllocConsole();
@@ -677,6 +654,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     });
 
     WebViewWindow::SetHotkeyPressedCallback([](int hotkeyId) {
+        try {
         const std::string biomeId = HotkeyManager::ResolveBiomeId(hotkeyId);
         if (biomeId.empty()) return;
         std::string status;
@@ -684,6 +662,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         WebViewWindow::SendMessageToUI(
             "{\"action\":\"STATUS\",\"payload\":\"" + EscapeJsonString(status) + "\"}"
         );
+        } catch (const std::exception& error) {
+            WindowScaler::CancelPendingLaunches();
+            WebViewWindow::RestoreDashboard();
+            WriteRuntimeLog(std::string("[APP] Hotkey activation failed: ") + error.what());
+            WebViewWindow::SendMessageToUI(R"({"action":"STATUS","payload":"Biome activation failed. Check the local runtime log."})");
+        }
     });
 
     WebViewWindow::SetMessageReceivedCallback([](const std::string& message) {
@@ -700,7 +684,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             const std::string action = request.value("action", "");
             WriteRuntimeLog("[APP] Action extracted: " + action);
 
-            if (action == "HOTKEY_RECORDING") {
+            if (action == "SET_THEME") {
+                LaunchPanel::SetTheme(request.value("theme", "light"));
+            }
+            else if (action == "HOTKEY_RECORDING") {
                 g_recordingHotkey = request.value("recording", false);
                 if (g_recordingHotkey) HotkeyManager::Clear(WebViewWindow::GetHwnd());
                 else SyncHotkeysFromDisk();
@@ -731,7 +718,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             }
             else if (action == "OPEN_EXTERNAL") {
                 const auto url = request.value("url", "");
-                if (url.rfind("https://github.com/", 0) == 0 || url.rfind("https://www.reddit.com/", 0) == 0) {
+                if (url.rfind("https://github.com/", 0) == 0 || url.rfind("https://www.reddit.com/", 0) == 0 ||
+                    url == "https://ko-fi.com/abdelghafourrebbouh") {
                     ShellExecuteA(WebViewWindow::GetHwnd(), "open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
                 }
             }
@@ -968,7 +956,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     });
     SendMonitorsChangedToUi();
 
+    LaunchPanel::Initialize(WebViewWindow::GetHwnd());
+    WindowScaler::SetLaunchProgressCallback([](const std::string& progress) { LaunchPanel::Update(progress); });
     WebViewWindow::RunMessageLoop();
+    WindowScaler::SetLaunchProgressCallback({});
+    LaunchPanel::Shutdown();
 
     HotkeyManager::Clear(WebViewWindow::GetHwnd());
     return 0;

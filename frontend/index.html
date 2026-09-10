@@ -6,6 +6,7 @@
     <meta name="color-scheme" content="light dark">
     <title>biomes</title>
     <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="onboarding.css">
 </head>
 <body>
     <main class="app-shell" aria-label="biomes dashboard">
@@ -102,13 +103,13 @@
                     <h3>Support the Project</h3>
                     <p>biomes is free and community-driven. If it improves your daily workflow or saves you time, here is how you can support its development:</p>
                     <ul class="support-options">
-                        <li><strong>Fuel Development</strong><button type="button" class="support-link" disabled title="Link will be added before release">Buy a Ko-fi ☕</button><p>Directly support future updates and independent building.</p></li>
+                        <li><strong>Fuel Development</strong><a class="support-link" id="open-kofi" href="https://ko-fi.com/abdelghafourrebbouh" target="_blank" rel="noopener noreferrer">support biomes</a><p>Directly support future updates and independent building. Opens in your browser.</p></li>
                         <li><strong>Explore the Code</strong><a class="support-link" href="https://github.com/AbdelGhafourRebbouh/biomes" target="_blank" rel="noopener noreferrer">GitHub Repository ↗</a><p>Star the repo, report issues, or contribute code.</p></li>
                         <li><strong>Meet the Developer</strong><a class="support-link" href="https://github.com/AbdelGhafourRebbouh" target="_blank" rel="noopener noreferrer">GitHub Profile ↗</a><p>Explore Abdelghafour Rebbouh’s open-source projects.</p></li>
                         <li><strong>Stay Connected</strong><button type="button" class="support-link" disabled title="Link will be added before release">Visit Website ↗</button><p>Explore portfolio projects and developer notes.</p></li>
                         <li><strong>Share Thoughts</strong><a class="support-link" href="#feedback">Send Feedback ↗</a><p>Suggest features or report bugs to refine the app.</p></li>
                     </ul>
-                    <p class="integration-note">Ko-fi and website links will be available before release.</p>
+                    <p class="integration-note">Support is optional. Opening Ko-fi connects to an external service with its own privacy policy. The website link will be available later.</p>
                 </div>
                 <div class="developer-note">
                     <h3>“Push to Main” Newsletter</h3>
@@ -117,16 +118,19 @@
                         <img class="newsletter-logo newsletter-logo-dark" src="logo/push to mian logo dark.svg" alt="Push to Main" width="648" height="372">
                         <img class="newsletter-logo newsletter-logo-white" src="logo/push to mian logo white.svg" alt="Push to Main" width="648" height="372">
                     </div>
-                    <div class="newsletter-control">
+                    <p id="newsletter-optional" class="newsletter-optional">Not necessary</p>
+                    <form id="newsletter-form" class="newsletter-control" action="https://assets.mailerlite.com/jsonp/1620793/forms/198235701885535513/subscribe" method="post">
                         <div class="newsletter-field">
                             <label for="newsletter-email">Enter your email address</label>
-                            <input id="newsletter-email" type="email" placeholder="Enter your email address" aria-describedby="newsletter-help newsletter-status" disabled>
-                            <span>Not necessary</span>
+                            <input id="newsletter-email" type="email" name="fields[email]" autocomplete="email" maxlength="254" placeholder="Enter your email address" aria-describedby="newsletter-help newsletter-status" required>
                         </div>
-                        <button type="button" disabled aria-describedby="newsletter-status">Subscribe</button>
-                    </div>
-                    <p id="newsletter-help" class="newsletter-help">Optional — strictly dev updates and major releases. No spam.</p>
-                    <p id="newsletter-status" class="integration-note">Subscriptions are not open yet. No email is collected here.</p>
+                        <input type="hidden" name="ml-submit" value="1">
+                        <input type="hidden" name="anticsrf" value="true">
+                        <button type="submit" aria-describedby="newsletter-status">Subscribe</button>
+                    </form>
+                    <div id="newsletter-success" class="newsletter-success" tabindex="-1" hidden>You're Subscribed</div>
+                    <p id="newsletter-help" class="newsletter-help">Optional — strictly dev updates and major releases. No spam. By subscribing, you send your email to MailerLite for Push to Main. Unsubscribe anytime.</p>
+                    <p id="newsletter-status" class="integration-note" role="status" aria-live="polite">Your workspace data is never included.</p>
                 </div>
                 <div class="developer-note">
                     <h3>100% Open Source, Forever</h3>
@@ -173,6 +177,7 @@
         </ol>
         <p>Next time, launch your biome from its card or shortcut.</p>
         <form method="dialog"><button class="back-home primary-action">Got it</button></form>
+        <button class="guide-link" id="replay-onboarding" type="button">Replay the introduction</button>
     </dialog>
     <dialog class="save-dialog" id="save-dialog" aria-labelledby="save-title" aria-describedby="save-intro">
         <form id="save-form">
@@ -241,7 +246,38 @@
                     <div class="card-content"><div><h2>Focus flow</h2><p class="hotkey">CTRL + ALT + F</p></div><p class="app-summary">VS Code, Obsidian, Chrome</p><div class="card-footer"><span class="screen-count"><svg class="map-icon" viewBox="0 0 42 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.2"><rect x="2" y="4" width="17" height="13" rx="2"/><rect x="23" y="4" width="17" height="13" rx="2"/><path d="M10 17v3m-4 0h8m17-3v3m-4 0h8"/></g></svg><span>2 screens</span></span></div></div>
                 </article>
     </template>
+    <dialog id="onboarding" class="onboarding" aria-labelledby="onboarding-title" aria-describedby="onboarding-description">
+        <div class="onboarding-layout">
+            <section class="onboarding-copy">
+                <header class="onboarding-top">
+                    <img src="logo/dark logo mi.svg" width="48" height="30" alt="biomes">
+                    <button class="onboarding-skip" type="button">Skip introduction</button>
+                </header>
+                <div class="onboarding-slide">
+                    <h1 id="onboarding-title" tabindex="-1"></h1>
+                    <div class="onboarding-illustration" aria-hidden="true"></div>
+                    <h2 id="onboarding-subtitle"></h2>
+                    <p id="onboarding-description"></p>
+                </div>
+                <footer class="onboarding-footer">
+                    <div class="onboarding-progress"><nav class="onboarding-dots" aria-label="Introduction cards"></nav><span class="onboarding-count">1 of 5</span></div>
+                    <div class="onboarding-controls">
+                        <button class="onboarding-next" type="button"><span class="onboarding-next-label">Next</span></button>
+                        <button class="onboarding-back" type="button" aria-label="Previous card">Back</button>
+                    </div>
+                    <img src="logo/biomes logo dark.svg" width="110" height="30" alt="biomes">
+                </footer>
+                <p class="onboarding-storage" role="status" hidden></p>
+            </section>
+            <aside class="onboarding-art" aria-label="Introduction artwork">
+                <img class="onboarding-photo" alt="" width="330" height="440">
+            </aside>
+        </div>
+        <p class="onboarding-announcement" role="status" aria-live="polite"></p>
+    </dialog>
+    <script src="onboarding.js"></script>
     <script src="app.js"></script>
     <script src="save-dialog.js"></script>
+    <script src="newsletter.js"></script>
 </body>
 </html>

@@ -18,6 +18,7 @@
         'images/image for the banner1.jpg',
         'images/image for the banner.jpg',
         'images/adsfwer.jpg',
+        'images/download (13).jpg',
         "images/'lkjhgfddwerw.jpg"
     ];
     const updateCoverSelection = () => {

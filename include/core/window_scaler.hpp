@@ -11,6 +11,7 @@
 #include <vector>
 #include <unordered_map>
 #include <unordered_set>
+#include <functional>
 
 struct SelectedBox;
 
@@ -41,6 +42,7 @@ struct OriginalWindowState {
 
 struct BiomeAppSession {
     HWND hwnd = nullptr;
+    DWORD processId = 0;
     WINDOWPLACEMENT preBiomePlacement{};
     bool hadPreBiomeState = false; // false when launched fresh during this session
 };
@@ -73,7 +75,7 @@ public:
     static void PrepareCleanSlate(HWND dashboardHwnd,
                                   const std::unordered_set<HWND>& keepVisible);
 
-    // Applies saved zone geometry (SetWindowPos + fullscreen exit for Electron).
+    // Requests placement; the timer verifies restore, geometry and renderer settling.
     static bool ForceSnapToBox(HWND hwnd, const SelectedBox& box);
 
     // Record pre-biome state before first snap this session.
@@ -102,6 +104,12 @@ public:
 
     // Discards deferred launch work when a Biome is closed or replaced.
     static void CancelPendingLaunches();
+    // Delay background dispatch/placement until activation finishes its clean-slate pass.
+    static void PauseLaunchTracking(bool paused);
+    static void SetLaunchProgressCallback(std::function<void(const std::string&)> callback);
+    static void BeginLaunchProgress(const std::string& name, const std::vector<SelectedBox>& boxes);
+    static void FinishLaunchSetup();
+    static void ReportLaunchState(const SelectedBox& box, const std::string& state, const std::string& detail = "");
 
 private:
     static std::unordered_map<HWND, OriginalWindowState> s_originalPositions;

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'none'">
+<title>biomes · opening your workspace</title><link rel="stylesheet" href="launch-panel.css"></head>
+<body>
+<section class="panel" aria-label="biome launch progress" data-state="opening">
+  <div class="panel-surface"></div>
+  <div class="content">
+    <div class="symbol" aria-hidden="true">
+      <div class="boxloader"><i></i><i></i><i></i></div>
+      <svg class="check" viewBox="0 0 48 48"><path d="m12 25 8 8 17-19"/></svg>
+      <svg class="warning" viewBox="0 0 48 48"><path d="M24 12v16m0 7v1"/><rect x="6" y="6" width="36" height="36" rx="13"/></svg>
+    </div>
+    <div class="copy" role="status" aria-live="polite" aria-atomic="true">
+      <h1>Opening your <em>biome</em></h1>
+      <p class="subtitle">A little moment. Your workspace is coming together.</p>
+      <div class="progress"><span class="count">Getting ready</span><span class="name"></span></div>
+    </div>
+    <div class="meter" aria-hidden="true"><span></span></div>
+    <p class="size-note" aria-live="polite"></p>
+    <div class="details" hidden></div>
+    <div class="actions" hidden><button class="continue" type="button">Continue working <span aria-hidden="true">↗</span></button><button class="report" type="button">Report an issue</button></div>
+    <div class="landscape" aria-hidden="true"></div>
+  </div>
+</section>
+<script src="launch-panel.js"></script>
+</body></html>

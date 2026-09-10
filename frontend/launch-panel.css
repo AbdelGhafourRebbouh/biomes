@@ -1,0 +1,47 @@
+@font-face{font-family:Fredoka;src:url('assets/fonts/FREDOKA-MEDIUM.woff2');font-weight:500;font-display:swap}
+@font-face{font-family:Gambetta;src:url('assets/fonts/GAMBETTA-SEMIBOLDITALIC.woff2');font-weight:600;font-style:italic;font-display:swap}
+@font-face{font-family:'General Sans';src:url('assets/fonts/GENERALSANS-REGULAR.woff2');font-weight:400;font-display:swap}
+@font-face{font-family:'General Sans';src:url('assets/fonts/GENERALSANS-MEDIUM.woff2');font-weight:500;font-display:swap}
+:root{color-scheme:light;--bg:#fff;--edge:#f2f2f2;--divider:#e0e0e3;--ink:#222;--muted:#737378;--shine:#ffffffd9}
+[data-theme=dark]{color-scheme:dark;--bg:#232323;--edge:#333;--divider:#1a1a1a;--ink:#fff;--muted:#c2c2c7;--shine:#ffffff21}
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;color:var(--ink)}
+:root{--selection-bg:#515151;--selection-text:#FFFFFF}
+[data-theme=dark]{--selection-bg:#F2F2F2;--selection-text:#232323}
+::selection{background-color:var(--selection-bg);color:var(--selection-text);text-shadow:none}
+body{font-family:'General Sans',sans-serif;display:flex;align-items:flex-end;justify-content:center;padding:28px 36px 36px}
+.panel{position:relative;width:374px;max-width:100%;transform-origin:50% 100%;filter:drop-shadow(0 15px 14px #0004) drop-shadow(0 3px 4px #0003);animation:arrive .65s cubic-bezier(.16,1,.3,1) both;transition:width .55s cubic-bezier(.22,1.18,.36,1);isolation:isolate}
+.panel-surface{position:absolute;inset:0;background:linear-gradient(145deg,var(--shine),transparent 65%),var(--bg);border:1px solid var(--divider);border-radius:40px;z-index:-1;clip-path:url(#panel-curve)}
+.content{padding:23px 26px 22px;text-align:center}.symbol{width:39px;height:39px;margin:0 auto 14px;position:relative}.boxloader{position:absolute;inset:3px}.boxloader i{display:block;position:absolute;border-radius:3px;background:var(--ink);width:14px;height:14px;animation-duration:4s;animation-timing-function:ease-in-out;animation-iteration-count:infinite}.boxloader i:nth-child(1){animation-name:box1}.boxloader i:nth-child(2){animation-name:box2}.boxloader i:nth-child(3){animation-name:box3}
+h1{font-family:Fredoka,sans-serif;font-weight:500;font-size:22px;line-height:1.2;margin:0}h1 em{font-family:Gambetta,serif;font-weight:600}.subtitle{font-size:12px;line-height:1.5;margin:9px auto 13px;max-width:290px;color:var(--muted)}
+.progress{display:flex;align-items:center;justify-content:center;gap:8px;font-size:11px;line-height:1.4;min-height:17px}.count{font-weight:500}.name{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px}.name:not(:empty):before{content:'·';padding-right:8px}
+.meter{height:3px;background:var(--edge);border-radius:10px;overflow:hidden;margin:15px 8px 0}.meter span{display:block;height:100%;width:0;background:var(--ink);border-radius:inherit;transition:width .5s ease}
+.check,.warning{position:absolute;inset:0;width:100%;height:100%;fill:none;stroke:currentColor;stroke-width:2.8;stroke-linecap:round;stroke-linejoin:round;display:none}.check path{stroke-dasharray:50;stroke-dashoffset:50}
+[data-state=success]{width:392px;animation:celebrate .65s cubic-bezier(.2,.9,.3,1.25) both}[data-state=success] .boxloader,[data-state=partial] .boxloader{display:none}[data-state=success] .check{display:block}[data-state=success] .check path{animation:draw .45s .15s ease forwards}[data-state=success] .meter{opacity:0;height:0;margin-top:6px}
+[data-state=partial]{width:430px}[data-state=partial] .warning{display:block}[data-state=partial] .meter{margin-bottom:14px}.details{font-size:11px;line-height:1.5;text-align:left;background:var(--edge);border-radius:14px;padding:10px 12px;max-height:72px;overflow:auto;scrollbar-width:none;color:var(--muted)}.details::-webkit-scrollbar{display:none}.details p{margin:0 0 5px}.details p:last-child{margin-bottom:0}
+.actions{display:flex;gap:8px;margin-top:14px}.actions[hidden],.details[hidden]{display:none}button{font:500 12px 'General Sans',sans-serif;cursor:pointer;min-height:39px;border:1px solid var(--divider);border-radius:13px;padding:9px 12px;transition:transform .18s,filter .18s}.continue{flex:1.3;background:var(--ink);color:var(--bg)}.continue span{margin-left:8px}.report{flex:1;background:var(--edge);color:var(--ink)}button:hover{filter:brightness(.93);transform:translateY(-1px)}button:active{transform:scale(.96)}button:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
+.panel{overflow:hidden;max-height:calc(100dvh - 64px)}
+.content{display:flex;flex-direction:column;clip-path:url(#panel-curve);max-height:calc(100dvh - 64px);overflow-y:auto;scrollbar-width:none}
+.content::-webkit-scrollbar{display:none}
+.symbol,.landscape{flex-shrink:0}
+.size-note{height:30px;min-height:30px;margin:8px 0 0;font-size:10px;line-height:15px;color:var(--muted);overflow:auto;scrollbar-width:none}
+.size-note::-webkit-scrollbar{display:none}
+[data-state=success] .content{min-height:306px;padding-top:28px;padding-bottom:22px}
+/* Keep the reserved height; inset the supplied artwork in matching corners.
+   Crop its padded canvas in CSS without modifying the original image. */
+.landscape{position:relative;height:102px;margin:0 -26px -22px;isolation:isolate}
+/* Independent continuous-corner silhouette, proportioned for this wide frame
+   rather than stretching the outer card's normalized corner geometry. */
+.landscape::before{content:'';position:absolute;inset:0 22px 16px;border-radius:28px;background:var(--edge) url('images/loading card.png') 50% 45%/164% auto no-repeat;mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 330 86' preserveAspectRatio='none'%3E%3Cpath d='M38 0H292C309 0 317 1 323 7C329 13 330 21 330 38V48C330 65 329 73 323 79C317 85 309 86 292 86H38C21 86 13 85 7 79C1 73 0 65 0 48V38C0 21 1 13 7 7C13 1 21 0 38 0Z'/%3E%3C/svg%3E");mask-size:100% 100%;mask-repeat:no-repeat}
+[data-state=partial] .actions{animation:reveal .35s .15s both}
+[data-attention=true]{width:430px}
+[data-attention=true] .meter{margin-bottom:14px}
+.panel.leaving{animation:none;pointer-events:none;min-height:0}
+.panel.leaving .content{position:absolute;bottom:0;width:100%;min-height:0;max-height:none;overflow:hidden;flex-shrink:0}
+@keyframes reveal{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+@keyframes box1{0%{width:33px;height:14px;left:0;top:19px}12.5%,25%,37.5%,50%,62.5%{width:14px;height:14px;left:0;top:19px}75%{width:14px;height:33px;left:0;top:0}87.5%,100%{width:14px;height:14px;left:0;top:0}}
+@keyframes box2{0%,12.5%,25%,37.5%{width:14px;height:14px;left:0;top:0}50%{width:33px;height:14px;left:0;top:0}62.5%,75%,87.5%,100%{width:14px;height:14px;left:19px;top:0}}
+@keyframes box3{0%,12.5%{width:14px;height:14px;left:19px;top:0}25%{width:14px;height:33px;left:19px;top:0}37.5%,50%,62.5%,75%,87.5%{width:14px;height:14px;left:19px;top:19px}100%{width:33px;height:14px;left:0;top:19px}}
+@keyframes arrive{from{opacity:0;transform:translateY(35px) scale(.86,.65)}60%{opacity:1;transform:translateY(-3px) scale(1.015,1.025)}to{transform:none}}
+@keyframes celebrate{0%{transform:scale(1)}45%{transform:scale(1.04,1.06)}100%{transform:scale(1)}}
+@keyframes draw{to{stroke-dashoffset:0}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition:none!important}.check path{stroke-dashoffset:0}}

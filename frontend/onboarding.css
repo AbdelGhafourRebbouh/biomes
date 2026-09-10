@@ -1,0 +1,94 @@
+/* Intentionally light-only and scoped: never changes the dashboard theme. */
+.onboarding {
+    --selection-bg:#515151; --selection-text:#FFFFFF;
+    --bg-primary:#fff; --bg-edge:#f2f2f2; --border-divider:#e0e0e3; --text-primary:#222;
+    color-scheme:light; color:#222; background:#fff;
+    font:400 14px/1.6 'General Sans',sans-serif;
+    width:min(920px,calc(100vw - 48px)); max-width:none;
+    height:min(620px,calc(100dvh - 64px)); max-height:none;
+    padding:12px; border:1px solid #e0e0e3; border-radius:28px;
+    box-shadow:0 24px 80px #0003; overflow:hidden;
+}
+.onboarding::backdrop { background:rgba(242,242,242,.92); backdrop-filter:blur(16px); }
+.onboarding[open] { animation:onboarding-enter .45s cubic-bezier(.16,1,.3,1) both; }
+.onboarding .onboarding-layout { display:grid; grid-template-columns:1fr 1fr; height:100%; min-height:0; gap:12px; }
+.onboarding .onboarding-copy { padding:18px 22px 16px; min-width:0; min-height:0; display:flex; flex-direction:column; overflow-y:auto; scrollbar-width:none; }
+.onboarding .onboarding-copy::-webkit-scrollbar { display:none; }
+.onboarding .onboarding-top { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-shrink:0; }
+.onboarding .onboarding-top img,.onboarding .onboarding-footer img { display:block; object-fit:contain; }
+.onboarding button { color:#222; font:500 12px 'General Sans',sans-serif; }
+.onboarding .onboarding-skip { background:none; border:0; padding:8px 0 8px 8px; color:#747478; }
+.onboarding .onboarding-skip:hover { color:#222; text-decoration:underline; text-underline-offset:4px; }
+.onboarding .onboarding-slide { flex:1; display:flex; flex-direction:column; justify-content:center; padding:26px 0 22px; min-height:min-content; }
+.onboarding h1 { font:500 clamp(26px,3.2vw,36px)/1.12 Fredoka,sans-serif; margin:0; letter-spacing:-.5px; }
+.onboarding h1 em,.onboarding h2 em { font:600 1.06em/1.1 Gambetta,serif; }
+.onboarding h2 { font:500 23px/1.2 Fredoka,sans-serif; margin:0 0 12px; }
+.onboarding #onboarding-description { margin:0; color:#6b6b70; font-size:14px; line-height:1.7; }
+.onboarding .onboarding-illustration { position:relative; height:142px; flex-shrink:0; margin:18px 0 22px; }
+.onboarding .onboarding-illustration img { display:block; width:100%; height:100%; object-fit:cover; }
+.onboarding .onboarding-banner { height:100%; width:100%; overflow:hidden; position:relative; border-radius:20px; background:#f2f2f2; }
+.onboarding .onboarding-banner::after { content:''; position:absolute; inset:0; background:linear-gradient(transparent,#0006); }
+.onboarding .onboarding-banner span { position:absolute; z-index:1; left:18px; bottom:14px; color:white; font:500 27px Fredoka,sans-serif; }
+.onboarding .onboarding-banner em { font-family:Gambetta,serif; }
+.onboarding .onboarding-grid { width:172px; height:126px; margin:8px auto; display:grid; grid-template-columns:1fr 1.5fr 1fr; grid-template-rows:1fr 1fr; gap:6px; }
+.onboarding .onboarding-grid i { background:#e0e0e3; border-radius:12px; }
+.onboarding .onboarding-grid i:nth-child(3) { grid-column:3; grid-row:1/3; }
+.onboarding .onboarding-grid i:nth-child(4) { grid-column:1/3; }
+.onboarding .onboarding-shortcuts { position:relative; width:100%; height:100%; }
+.onboarding .onboarding-shortcuts figure { position:absolute; margin:0; overflow:hidden; width:48%; height:80px; border-radius:13px; box-shadow:0 5px 14px #0002; }
+.onboarding .onboarding-shortcuts figure:nth-child(1) { left:0; top:35px; transform:rotate(-6deg); }
+.onboarding .onboarding-shortcuts figure:nth-child(2) { right:0; top:0; transform:rotate(5deg); }
+.onboarding .onboarding-shortcuts figure:nth-child(3) { left:32%; bottom:0; transform:rotate(-2deg); }
+.onboarding .onboarding-shortcuts figcaption { position:absolute; inset:auto 8px 8px; color:white; font-size:11px; text-shadow:0 1px 4px #000; }
+.onboarding .onboarding-caution { width:72px; height:72px; display:block; margin:35px auto; fill:none; stroke:#222; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
+.onboarding .onboarding-footer { display:grid; grid-template-columns:1fr auto; align-items:center; gap:12px; flex-shrink:0; }
+.onboarding .onboarding-progress { grid-column:1/-1; display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.onboarding .onboarding-count { color:#747478; font-size:12px; font-variant-numeric:tabular-nums; }
+.onboarding .onboarding-controls { display:flex; align-items:center; gap:8px; }
+.onboarding .onboarding-next { display:grid; place-items:center; padding:0 17px; background:#222; color:#fff; border:1px solid #222; border-radius:13px; min-width:67px; min-height:40px; transition:transform .2s ease,box-shadow .2s ease,background .2s ease; }
+.onboarding .onboarding-next-label { padding:0; }
+.onboarding .onboarding-back { border:0; border-radius:12px; padding:0 12px; min-height:40px; background:transparent; color:#747478; }
+.onboarding .onboarding-back:hover { background:#f2f2f2; color:#222; }
+.onboarding .onboarding-back:disabled { visibility:hidden; pointer-events:none; }
+.onboarding .onboarding-next:hover { transform:translateY(-2px); box-shadow:0 5px 12px #0001; }
+.onboarding .onboarding-next:active { transform:scale(.97); }
+.onboarding .onboarding-art { position:relative; min-width:0; min-height:0; border-radius:20px; overflow:hidden; background:#f2f2f2; }
+.onboarding .onboarding-photo { width:100%; height:100%; display:block; object-fit:cover; object-position:center; }
+.onboarding .onboarding-photo[data-card="two"] { object-position:center top; }
+.onboarding .onboarding-dots { display:flex; gap:0; margin-left:-8px; }
+.onboarding .onboarding-dots button { display:grid; place-items:center; width:28px; height:28px; background:transparent; border:0; padding:0; border-radius:7px; }
+.onboarding .onboarding-dots button::before { content:''; width:10px; height:10px; border-radius:3px; background:#2224; transition:background .2s,transform .2s; }
+.onboarding .onboarding-dots button[aria-current=step]::before { background:#222; transform:scale(1.15); }
+.onboarding .onboarding-dots button:hover::before { background:#222a; }
+.onboarding .onboarding-storage { font-size:11px; color:#6b6b70; margin:8px 0 0; }
+.onboarding .onboarding-announcement { position:absolute; width:1px; height:1px; padding:0; margin:-1px; clip-path:inset(50%); overflow:hidden; }
+.onboarding :focus-visible { outline:2px solid #222; outline-offset:3px; }
+.onboarding h1:focus { outline:none; }
+@keyframes onboarding-enter { from { opacity:0; transform:translateY(12px) scale(.98); } to { opacity:1; transform:none; } }
+@media(max-width:760px) {
+    .onboarding { width:calc(100vw - 28px); padding:10px; }
+    .onboarding .onboarding-layout { grid-template-columns:1.15fr 1fr; gap:8px; }
+    .onboarding .onboarding-copy { padding:12px; }
+    .onboarding .onboarding-footer img { width:82px; }
+    .onboarding .onboarding-next-label { padding:0; }
+    .onboarding #onboarding-description { font-size:13px; }
+}
+@media(max-width:560px) {
+    .onboarding { height:calc(100dvh - 24px); width:calc(100vw - 24px); }
+    .onboarding .onboarding-layout { display:flex; flex-direction:column; overflow-y:auto; scrollbar-width:none; }
+    .onboarding .onboarding-copy { overflow:visible; flex-shrink:0; }
+    .onboarding .onboarding-art { flex-shrink:0; height:200px; }
+    .onboarding .onboarding-slide { padding-top:20px; }
+    .onboarding .onboarding-photo { object-position:center 45%; }
+}
+@media(max-height:570px) and (min-width:561px) {
+    .onboarding .onboarding-slide { padding:16px 0; }
+    .onboarding .onboarding-illustration { height:94px; margin:12px 0; }
+    .onboarding .onboarding-grid { height:90px; margin:0 auto; }
+    .onboarding .onboarding-caution { height:62px; margin:16px auto; }
+    .onboarding .onboarding-shortcuts figure { height:58px; }
+    .onboarding h1 { font-size:27px; }
+}
+@media(prefers-reduced-motion:reduce) {
+    .onboarding,.onboarding * { animation:none!important; transition:none!important; }
+}

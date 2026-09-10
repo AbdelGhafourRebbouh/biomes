@@ -8,9 +8,17 @@
 #include <iostream>
 #include <string>
 #include <functional>
+#include <deque>
 
 #include <WebView2.h>
 #include "../../include/ui/webview_window.hpp"
+#include "../../resources/resource.h"
+
+namespace {
+constexpr UINT kDispatchWebMessage = WM_APP + 71;
+std::deque<std::string> pendingWebMessages;
+bool dispatchingWebMessage = false;
+}
 
 // ============================================================================
 // Function Pointer Definition for Dynamic Loading in MinGW
@@ -118,8 +126,13 @@ public:
         return count;
     }
     HRESULT __stdcall Invoke(ICoreWebView2* sender, ICoreWebView2WebMessageReceivedEventArgs* args) override {
-        if (m_func) return m_func(sender, args);
-        return S_OK;
+        try {
+            if (m_func) return m_func(sender, args);
+            return S_OK;
+        } catch (...) {
+            // C++ exceptions must not escape a COM callback boundary.
+            return E_FAIL;
+        }
     }
 };
 
@@ -146,6 +159,11 @@ bool WebViewWindow::Initialize(HINSTANCE hInstance, int nCmdShow, const std::str
     wc.lpszClassName = "BiomesWebViewWindowClass";
     wc.hCursor       = LoadCursor(NULL, IDC_ARROW);
     wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    // Shared resource icons belong to the module; do not DestroyIcon these.
+    wc.hIcon = static_cast<HICON>(LoadImageW(hInstance, MAKEINTRESOURCEW(IDI_BIOMES), IMAGE_ICON,
+        GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_SHARED));
+    wc.hIconSm = static_cast<HICON>(LoadImageW(hInstance, MAKEINTRESOURCEW(IDI_BIOMES), IMAGE_ICON,
+        GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_SHARED));
 
     RegisterClassExA(&wc);
 
@@ -218,7 +236,10 @@ void WebViewWindow::InitWebView(const std::string& startUrl) {
                                 const int length = WideCharToMultiByte(CP_UTF8, 0, wMsg.data(), static_cast<int>(wMsg.size()), nullptr, 0, nullptr, nullptr);
                                 std::string msg(length, '\0');
                                 if (length > 0) WideCharToMultiByte(CP_UTF8, 0, wMsg.data(), static_cast<int>(wMsg.size()), msg.data(), length, nullptr, nullptr);
-                                if (s_onMessageReceived) s_onMessageReceived(msg);
+                                // Run native commands after leaving WebView2's COM event.
+                                pendingWebMessages.push_back(std::move(msg));
+                                if (!PostMessage(s_hwnd, kDispatchWebMessage, 0, 0))
+                                    pendingWebMessages.pop_back();
                             }
                             return S_OK;
                         }
@@ -278,6 +299,18 @@ void WebViewWindow::RunMessageLoop() {
 
 LRESULT CALLBACK WebViewWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
+        case kDispatchWebMessage: {
+            if (dispatchingWebMessage || pendingWebMessages.empty()) return 0;
+            std::string message = std::move(pendingWebMessages.front());
+            pendingWebMessages.pop_front();
+            dispatchingWebMessage = true;
+            try { if (s_onMessageReceived) s_onMessageReceived(message); }
+            catch (const std::exception& error) { std::cerr << "[IPC] " << error.what() << std::endl; }
+            catch (...) { std::cerr << "[IPC] Unexpected native handler exception" << std::endl; }
+            dispatchingWebMessage = false;
+            if (!pendingWebMessages.empty()) PostMessage(hwnd, kDispatchWebMessage, 0, 0);
+            return 0;
+        }
         case WM_GETMINMAXINFO: {
             auto* limits = reinterpret_cast<MINMAXINFO*>(lParam);
             const UINT dpi = GetDpiForWindow(hwnd);
@@ -351,6 +384,7 @@ LRESULT CALLBACK WebViewWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
             }
             break;
         case WM_DESTROY:
+            pendingWebMessages.clear();
             if (s_webview) { s_webview->Release(); s_webview = nullptr; }
             if (s_controller) { s_controller->Release(); s_controller = nullptr; }
             PostQuitMessage(0);

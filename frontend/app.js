@@ -34,6 +34,7 @@
         const dark = theme === 'dark';
         themeButton.setAttribute('aria-pressed', String(dark));
         themeButton.setAttribute('aria-label', `Switch to ${dark ? 'light' : 'dark'} mode`);
+        if (host) host.postMessage({ action:'SET_THEME', theme });
     };
 
     applyTheme(storedTheme === 'dark' ? 'dark' : 'light');
@@ -78,7 +79,7 @@
             heading: 'Your data stays on your machine. Always.',
             banner: 'Privacy First',
             badge: 'Local & Open Source',
-            description: 'Every grid configuration, hotkey, and workspace layout is saved strictly on your device. biomes operates entirely offline with zero cloud tracking, no external servers, and zero telemetry.'
+            description: 'Every grid configuration, hotkey, and workspace layout is saved strictly on your device. Workspace management works offline, with no cloud tracking or telemetry. Optional support and community links connect to external services. If you subscribe to Push to Main, your email is sent to MailerLite—not your workspace data.'
         },
         feedback: {
             title: 'Help shape what comes next', accent: 'comes next'

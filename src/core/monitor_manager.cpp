@@ -257,85 +257,7 @@ int MonitorManager::ResolveMonitorIndex(const string& monitorDevice, int fallbac
 }
 
 MonitorResolveResult MonitorManager::ResolveMonitorForBox(const MonitorBoxRef& box) {
-    MonitorResolveResult result;
-    const auto monitors = GetConnectedMonitors();
-
-    // 1) Hardware identity — if saved, trust it; never fall through to index
-    //    (avoids dumping secondary zones onto the only remaining screen).
-    if (!box.stableMonitorId.empty()) {
-        MonitorDetail detail;
-        if (GetMonitorByStableId(box.stableMonitorId, detail)) {
-            result.resolvedIndex = detail.index;
-            result.matchKind = MonitorMatchKind::StableId;
-            result.matchDetail = "stableId=" + box.stableMonitorId;
-            cout << "[MONITOR] zone matched via stableId " << box.stableMonitorId
-                 << " -> index " << detail.index << endl;
-            return result;
-        }
-        if (!box.monitorDevice.empty()) {
-            if (GetMonitorByName(box.monitorDevice, detail)) {
-                result.resolvedIndex = detail.index;
-                result.matchKind = MonitorMatchKind::DeviceName;
-                result.matchDetail = "device=" + box.monitorDevice;
-                cout << "[MONITOR] zone matched via deviceName " << box.monitorDevice
-                     << " -> index " << detail.index << endl;
-                return result;
-            }
-        }
-        result.matchKind = MonitorMatchKind::NotFound;
-        result.skipReason = (monitors.size() == 1)
-            ? "secondary zone skipped (single monitor)"
-            : "monitor disconnected (stableId not found)";
-        cout << "[MONITOR] zone skipped: " << result.skipReason
-             << " stableId=" << box.stableMonitorId << endl;
-        return result;
-    }
-
-    // 2) GDI device name (legacy / no EDID)
-    if (!box.monitorDevice.empty()) {
-        MonitorDetail detail;
-        if (GetMonitorByName(box.monitorDevice, detail)) {
-            result.resolvedIndex = detail.index;
-            result.matchKind = MonitorMatchKind::DeviceName;
-            result.matchDetail = "device=" + box.monitorDevice;
-            cout << "[MONITOR] zone matched via deviceName " << box.monitorDevice
-                 << " -> index " << detail.index << endl;
-            return result;
-        }
-        result.matchKind = MonitorMatchKind::NotFound;
-        result.skipReason = (monitors.size() == 1)
-            ? "secondary zone skipped (single monitor)"
-            : "monitor disconnected";
-        cout << "[MONITOR] zone skipped: " << result.skipReason
-             << " device=" << box.monitorDevice << endl;
-        return result;
-    }
-
-    // 3) Index-only legacy: on a single screen, only accept the primary index.
-    if (monitors.size() == 1) {
-        const int primaryIndex = FindPrimaryIndex(monitors);
-        if (box.monitorIndex == primaryIndex) {
-            result.resolvedIndex = primaryIndex;
-            result.matchKind = MonitorMatchKind::Index;
-            result.matchDetail = "index=" + to_string(box.monitorIndex);
-            return result;
-        }
-        result.matchKind = MonitorMatchKind::NotFound;
-        result.skipReason = "secondary zone skipped (single monitor)";
-        return result;
-    }
-
-    if (box.monitorIndex >= 0 && box.monitorIndex < static_cast<int>(monitors.size())) {
-        result.resolvedIndex = box.monitorIndex;
-        result.matchKind = MonitorMatchKind::Index;
-        result.matchDetail = "index=" + to_string(box.monitorIndex);
-        cout << "[MONITOR] zone matched via index " << box.monitorIndex << endl;
-        return result;
-    }
-
-    result.matchKind = MonitorMatchKind::NotFound;
-    result.skipReason = "monitor disconnected";
-    return result;
+    return ResolveMonitorForBox(box, GetConnectedMonitors());
 }
 
 bool MonitorManager::GetWorkAreaForBox(int monitorIndex,
@@ -347,14 +269,19 @@ bool MonitorManager::GetWorkAreaForBox(int monitorIndex,
     ref.monitorDevice = monitorDevice;
     ref.stableMonitorId = stableMonitorId;
 
-    const MonitorResolveResult resolved = ResolveMonitorForBox(ref);
+    // Resolve identity and bounds from the same snapshot, avoiding index reuse
+    // between two enumerations during a display disconnection.
+    const auto monitors = GetConnectedMonitors();
+    const MonitorResolveResult resolved = ResolveMonitorForBox(ref, monitors);
     if (resolved.resolvedIndex < 0) return false;
 
-    const auto monitors = GetConnectedMonitors();
-    if (resolved.resolvedIndex >= static_cast<int>(monitors.size())) return false;
-
-    outWork = monitors[resolved.resolvedIndex].rcWork;
-    return true;
+    for (const auto& monitor : monitors) {
+        if (monitor.index == resolved.resolvedIndex) {
+            outWork = monitor.rcWork;
+            return true;
+        }
+    }
+    return false;
 }
 
 string MonitorManager::GetCurrentTopologyHash() {

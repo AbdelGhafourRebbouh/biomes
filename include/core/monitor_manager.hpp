@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <string>
 #include <vector>
+#include <cstring>
 
 struct MonitorDetail {
     int index = 0;
@@ -48,6 +49,36 @@ public:
 
     // Never remaps missing monitors onto another screen — skipped zones stay skipped.
     static MonitorResolveResult ResolveMonitorForBox(const MonitorBoxRef& box);
+
+    // Pure snapshot resolver shared by live lookups and regression tests. A
+    // saved identity is authoritative: display names/indices can be reassigned.
+    static MonitorResolveResult ResolveMonitorForBox(
+        const MonitorBoxRef& box, const std::vector<MonitorDetail>& monitors) {
+        MonitorResolveResult result;
+        for (const auto& monitor : monitors) {
+            const bool matches = !box.stableMonitorId.empty()
+                ? _stricmp(box.stableMonitorId.c_str(), monitor.stableId.c_str()) == 0
+                : !box.monitorDevice.empty()
+                    ? _stricmp(box.monitorDevice.c_str(), monitor.deviceName.c_str()) == 0
+                    : box.monitorIndex == monitor.index;
+            if (!matches) continue;
+            if (result.resolvedIndex >= 0) {
+                result.resolvedIndex = -1;
+                result.matchKind = MonitorMatchKind::NotFound;
+                result.skipReason = "monitor identity ambiguous";
+                return result;
+            }
+            result.resolvedIndex = monitor.index;
+            result.matchKind = !box.stableMonitorId.empty() ? MonitorMatchKind::StableId
+                : !box.monitorDevice.empty() ? MonitorMatchKind::DeviceName : MonitorMatchKind::Index;
+            result.matchDetail = !box.stableMonitorId.empty() ? "stableId=" + box.stableMonitorId
+                : !box.monitorDevice.empty() ? "device=" + box.monitorDevice
+                : "index=" + std::to_string(box.monitorIndex);
+        }
+        if (result.resolvedIndex < 0)
+            result.skipReason = "saved monitor unavailable; zone skipped";
+        return result;
+    }
 
     static bool GetWorkAreaForBox(int monitorIndex,
                                    const std::string& monitorDevice,

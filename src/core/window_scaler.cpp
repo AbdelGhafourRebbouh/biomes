@@ -1,7 +1,9 @@
 #include "../../include/core/window_scaler.hpp"
 #include "../../include/core/monitor_manager.hpp"
 #include "../../include/core/app_launcher.hpp"
+#include "../../include/core/launch_progress.hpp"
 #include "../../include/ui/grid_overlay.hpp"
+#include "../../include/ui/webview_window.hpp"
 
 #include <iostream>
 #include <vector>
@@ -11,6 +13,10 @@
 #include <filesystem>
 #include <algorithm>
 #include <limits>
+#include <fstream>
+#include <atomic>
+#include <memory>
+#include <cmath>
 
 #include <windows.h>
 #include <appmodel.h>
@@ -126,6 +132,7 @@ struct ChildIdentitySearch {
 };
 
 struct PendingSnap {
+    ULONGLONG id = 0;
     SelectedBox box;
     DWORD launchPid = 0;
     string exeName;
@@ -133,20 +140,184 @@ struct PendingSnap {
     unordered_set<HWND> knownWindows;
     ULONGLONG deadline = 0;
     HWND snappedHwnd = nullptr;
+    string fullPath;
+    bool dispatched = false;
+    HWND candidateHwnd = nullptr;
+    RECT candidateRect{};
+    string candidateTitle;
+    ULONGLONG candidateSince = 0;
+    DWORD snappedPid = 0;
+    bool provisionalWindow = false;
 };
+
+struct LaunchResult {
+    atomic<bool> done{false};
+    atomic<bool> cancelled{false};
+    bool success = false;
+    DWORD pid = 0;
+    string error;
+};
+struct LaunchJob {
+    ULONGLONG id;
+    shared_ptr<LaunchResult> result;
+};
+vector<LaunchJob> g_launchJobs;
+struct PlacementCheck {
+    HWND hwnd;
+    DWORD pid;
+    RECT target;
+    ULONGLONG due;
+    unsigned retries = 0;
+    bool waitingRestore = false;
+    ULONGLONG restoreDeadline = 0;
+    bool refreshNotion = false;
+    bool returnFromRefresh = false;
+    SelectedBox zone;
+    unsigned restoreAttempts = 0;
+    unsigned retargets = 0;
+};
+vector<PlacementCheck> g_placementChecks;
+struct LaunchContext {
+    SelectedBox box;
+    string fullPath;
+    shared_ptr<LaunchResult> result;
+};
+void CALLBACK LaunchWorker(PTP_CALLBACK_INSTANCE, void* parameter);
+bool CalculateTargetRect(const SelectedBox& box, RECT& outTarget);
 
 vector<PendingSnap> g_pendingSnaps;
 unordered_set<HWND> g_pendingClaimedWindows;
 HWINEVENTHOOK g_pendingObjectHook = nullptr;
 HWINEVENTHOOK g_pendingForegroundHook = nullptr;
+ULONGLONG g_pendingGeneration = 0;
+ULONGLONG g_nextPendingId = 0;
+UINT_PTR g_pendingTimer = 0;
+bool g_processingPending = false;
+bool g_trackingPaused = false;
+bool g_scanRequested = true;
+LaunchProgressState g_launchProgress;
+ULONGLONG g_progressDeadline = 0;
+std::function<void(const std::string&)> g_progressCallback;
+ULONGLONG g_lastScan = 0;
+
+void TrackerLog(const string& message) {
+    ofstream log("config/biomes_runtime.log", ios::app);
+    if (log) log << "[TRACKER] " << GetTickCount64() << " " << message << endl;
+}
+
+string RectDescription(const RECT& rect) {
+    return to_string(rect.left) + "," + to_string(rect.top) + " " +
+           to_string(rect.right - rect.left) + "x" + to_string(rect.bottom - rect.top);
+}
+
+bool LooksFullscreen(LONG_PTR style, bool minimized, bool maximized,
+                     const RECT& rect, const RECT& monitor) {
+    // Geometry and style are only hints, not proof of exclusive/F11 fullscreen.
+    return !minimized && !maximized && !(style & (WS_CAPTION | WS_THICKFRAME)) &&
+        abs(rect.left - monitor.left) <= 2 && abs(rect.top - monitor.top) <= 2 &&
+        abs(rect.right - monitor.right) <= 2 && abs(rect.bottom - monitor.bottom) <= 2;
+}
+
+string DescribeWindowState(HWND hwnd, const RECT& actual) {
+    if (IsIconic(hwnd)) return "minimized";
+    if (IsZoomed(hwnd)) return "maximized";
+    MONITORINFO monitor{sizeof(MONITORINFO)};
+    if (GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &monitor) &&
+        LooksFullscreen(GetWindowLongPtrW(hwnd, GWL_STYLE), false, false, actual, monitor.rcMonitor))
+        return "fullscreen-like (unconfirmed)";
+    return "normal";
+}
+
+bool RequestTargetPlacement(HWND hwnd, const RECT& target, const char* stage, bool show = false) {
+    const BOOL accepted = SetWindowPos(hwnd, nullptr, target.left, target.top,
+        target.right-target.left, target.bottom-target.top,
+        SWP_ASYNCWINDOWPOS | SWP_NOACTIVATE | SWP_NOZORDER | (show ? SWP_SHOWWINDOW : 0));
+    if (!accepted) {
+        const DWORD error = GetLastError();
+        TrackerLog(string("placement API failed stage=") + stage + " hwnd=" +
+                   to_string(reinterpret_cast<uintptr_t>(hwnd)) + " error=" + to_string(error) +
+                   " target=" + RectDescription(target));
+    }
+    return accepted != FALSE;
+}
+
+struct ScopedFlag {
+    bool& value;
+    explicit ScopedFlag(bool& flag) : value(flag) { value = true; }
+    ~ScopedFlag() { value = false; }
+};
+
+void CALLBACK LaunchWorker(PTP_CALLBACK_INSTANCE, void* parameter) {
+    unique_ptr<LaunchContext> context(static_cast<LaunchContext*>(parameter));
+    auto result = context->result;
+    const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    try {
+        if (FAILED(com)) throw runtime_error("COM initialization failed");
+        if (!result->cancelled.load()) {
+            const auto& box = context->box;
+            const auto& fullPath = context->fullPath;
+            const bool obsidian = AppLauncher::IsObsidianExe(fullPath);
+            const bool packaged = AppLauncher::IsPackagedAppPath(fullPath) || !box.aumid.empty();
+            string outError;
+    DWORD pid = 0;
+    bool launched = false;
+
+    if (obsidian) {
+        const string uri = AppLauncher::ResolveObsidianLaunchUri(box);
+        if (uri.empty()) {
+            outError = "Obsidian vault could not be resolved";
+        } else if (!result->cancelled.load()) {
+            launched = AppLauncher::LaunchObsidianWithUri(uri, pid);
+        }
+    } else if (packaged) {
+        if (!result->cancelled.load())
+            launched = AppLauncher::LaunchPackagedAppForBox(box, pid);
+    } else if (FileExists(fullPath)) {
+        STARTUPINFOA startup{};
+        startup.cb = sizeof(startup);
+        PROCESS_INFORMATION process{};
+        string commandLine = "\"" + fullPath + "\"";
+        vector<char> commandBuffer(commandLine.begin(), commandLine.end());
+        commandBuffer.push_back('\0');
+        launched = !result->cancelled.load() && CreateProcessA(fullPath.c_str(), commandBuffer.data(), nullptr, nullptr,
+                                  FALSE, 0, nullptr, nullptr, &startup, &process) != FALSE;
+        if (launched) {
+            pid = process.dwProcessId;
+            CloseHandle(process.hThread);
+            CloseHandle(process.hProcess);
+        } else if (!result->cancelled.load()) {
+            SHELLEXECUTEINFOA shell{};
+            shell.cbSize = sizeof(shell);
+            shell.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
+            shell.lpVerb = "open";
+            shell.lpFile = fullPath.c_str();
+            shell.nShow = SW_SHOWNORMAL;
+            launched = ShellExecuteExA(&shell) != FALSE;
+            if (launched && shell.hProcess) {
+                pid = GetProcessId(shell.hProcess);
+                CloseHandle(shell.hProcess);
+            }
+        }
+    } else {
+        outError = "application path does not exist";
+    }
+
+            result->success = launched;
+            result->pid = pid;
+            result->error = outError.empty() && !launched ? "Windows error " + to_string(GetLastError()) : outError;
+        }
+    } catch (const exception& error) { result->error = error.what(); }
+      catch (...) { result->error = "Unexpected launch failure"; }
+    if (SUCCEEDED(com)) CoUninitialize();
+    result->done.store(true);
+}
 
 bool IsWorkspaceCandidate(HWND hwnd) {
     if (!hwnd || !IsWindow(hwnd) || !WindowScaler::IsMainApplicationWindow(hwnd)) return false;
-
-    const LONG_PTR style = GetWindowLongPtr(hwnd, GWL_STYLE);
-    // Fixed-size dialogs and splash windows are not workspace targets. Borderless
-    // apps are accepted only when they expose a maximize box.
-    return (style & WS_THICKFRAME) != 0 || (style & WS_MAXIMIZEBOX) != 0;
+    // Fixed-size application windows are valid; actual dialogs remain choosers.
+    wchar_t className[128]{};
+    GetClassNameW(hwnd, className, 128);
+    return IsWindowEnabled(hwnd) && wcscmp(className, L"#32770") != 0;
 }
 
 bool MatchesPendingSnap(const PendingSnap& pending, const WindowInfo& window) {
@@ -156,13 +327,41 @@ bool MatchesPendingSnap(const PendingSnap& pending, const WindowInfo& window) {
             return true;
         }
     }
-    return (pending.launchPid != 0 && window.processId == pending.launchPid) ||
-           (!pending.exeName.empty() && !window.processName.empty() &&
-            _stricmp(pending.exeName.c_str(), window.processName.c_str()) == 0);
+    if (!pending.expectedAumids.empty()) return false;
+    // A PID alone can belong to a bootstrapper or be reused. Require executable
+    // identity too; when full paths are available, do not match same-name apps
+    // from different installations.
+    if (!pending.fullPath.empty() && !window.processPath.empty())
+        return _stricmp(pending.fullPath.c_str(), window.processPath.c_str()) == 0;
+    return !pending.exeName.empty() && !window.processName.empty() &&
+           _stricmp(pending.exeName.c_str(), window.processName.c_str()) == 0;
+}
+
+int CandidateScore(const PendingSnap& pending, const WindowInfo& window) {
+    if (!MatchesPendingSnap(pending, window)) return -1;
+    int score = 100;
+    if (pending.launchPid && window.processId == pending.launchPid) score += 100;
+    if (!pending.box.titleHint.empty() && window.title == pending.box.titleHint) score += 200;
+    if (GetWindowLongPtr(window.hwnd, GWL_STYLE) & WS_THICKFRAME) score += 20;
+    return score;
+}
+
+bool IsStartupCandidate(const WindowInfo& window) {
+    // Hints, not exclusions: a legitimate fixed-size application still opens.
+    // Only a transition out of this state permits a visible-window handoff.
+    if (!(GetWindowLongPtr(window.hwnd, GWL_STYLE) & WS_THICKFRAME)) return true;
+    return _stricmp(window.title.c_str(), "Welcome") == 0 ||
+           _strnicmp(window.title.c_str(), "Welcome to ", 11) == 0 ||
+           _stricmp(window.title.c_str(), "Select Project") == 0 ||
+           _stricmp(window.title.c_str(), "Open Project") == 0;
 }
 
 void StopPendingHooksIfIdle() {
-    if (!g_pendingSnaps.empty()) return;
+    if (!g_pendingSnaps.empty() || !g_launchJobs.empty() || !g_placementChecks.empty()) return;
+    if (g_pendingTimer) {
+        KillTimer(nullptr, g_pendingTimer);
+        g_pendingTimer = 0;
+    }
     if (g_pendingObjectHook) {
         UnhookWinEvent(g_pendingObjectHook);
         g_pendingObjectHook = nullptr;
@@ -173,57 +372,319 @@ void StopPendingHooksIfIdle() {
     }
 }
 
-void ProcessPendingSnaps(HWND eventHwnd = nullptr) {
-    const ULONGLONG now = GetTickCount64();
-    const vector<WindowInfo> windows = WindowScaler::GetActiveWindows();
-
-    for (auto it = g_pendingSnaps.begin(); it != g_pendingSnaps.end();) {
-        if (now >= it->deadline) {
-            cerr << "[LAUNCHER] Timed out waiting for workspace window: " << it->exeName << endl;
-            it = g_pendingSnaps.erase(it);
-            continue;
+void ProcessPendingSnaps() {
+    if (g_processingPending || g_trackingPaused) return;
+    ScopedFlag processing(g_processingPending);
+    if (g_launchProgress.active && g_launchProgress.sealed && g_progressDeadline && GetTickCount64() >= g_progressDeadline) {
+        bool changed = false;
+        for (auto& entry : g_launchProgress.items) {
+            if (entry.second.state == "opening" || entry.second.state == "waiting") {
+                entry.second.state = "failed";
+                entry.second.detail = "Timed out waiting for the app to finish opening.";
+                changed = true;
+            }
         }
-
-        HWND candidateHwnd = nullptr;
-        for (const auto& window : windows) {
-            if (it->knownWindows.count(window.hwnd) || g_pendingClaimedWindows.count(window.hwnd)) continue;
-            if (eventHwnd && window.hwnd != eventHwnd) continue;
-            if (!MatchesPendingSnap(*it, window) || !IsWorkspaceCandidate(window.hwnd)) continue;
-            candidateHwnd = window.hwnd;
+        g_progressDeadline = 0;
+        if (changed && g_progressCallback) g_progressCallback(g_launchProgress.Snapshot().dump());
+    }
+    const auto placementGeneration = g_pendingGeneration;
+    // Win32/COM calls can dispatch sent messages. Work on detached storage so
+    // cancellation cannot invalidate the verifier's iterators.
+    auto checks = std::move(g_placementChecks);
+    g_placementChecks.clear();
+    for (auto check = checks.begin(); check != checks.end();) {
+        if (placementGeneration != g_pendingGeneration) return;
+        if (GetTickCount64() < check->due) { ++check; continue; }
+        DWORD pid = 0;
+        GetWindowThreadProcessId(check->hwnd, &pid);
+        RECT actual{};
+        if (pid != check->pid || !GetWindowRect(check->hwnd, &actual)) {
+            WindowScaler::ReportLaunchState(check->zone, "failed", "Window closed before placement was verified.");
+            check = checks.erase(check); continue;
+        }
+        RECT target{};
+        if (!CalculateTargetRect(check->zone, target)) {
+            TrackerLog("placement cancelled: monitor unavailable or zone invalid pid=" + to_string(pid));
+            WindowScaler::ReportLaunchState(check->zone, "skipped", "Monitor unavailable.");
+            check = checks.erase(check); continue;
+        }
+        if (!EqualRect(&check->target, &target)) {
+            if (++check->retargets > 2) {
+                TrackerLog("placement cancelled: display bounds keep changing pid=" + to_string(pid));
+                WindowScaler::ReportLaunchState(check->zone, "failed", "Display bounds changed repeatedly.");
+                WebViewWindow::SendMessageToUI(R"({"action":"STATUS","payload":"Display bounds changed repeatedly during placement. Wait for your display setup to settle, then try the biome again."})");
+                check = checks.erase(check); continue;
+            }
+            TrackerLog("placement target changed pid=" + to_string(pid) + " from=" +
+                       RectDescription(check->target) + " to=" + RectDescription(target));
+            check->target = target;
+            check->retries = 0;
+        }
+        const bool minimized = IsIconic(check->hwnd) != FALSE;
+        const bool maximized = IsZoomed(check->hwnd) != FALSE;
+        if (check->waitingRestore || minimized || maximized) {
+            if (minimized || maximized) {
+                check->waitingRestore = true;
+                if (GetTickCount64() >= check->restoreDeadline) {
+                    WindowScaler::ReportLaunchState(check->zone, "failed", "Could not restore the app to a normal window.");
+                    TrackerLog("restore did not settle; leaving window unchanged pid=" + to_string(pid) +
+                               " minimized=" + to_string(minimized) + " maximized=" + to_string(maximized));
+                    WebViewWindow::SendMessageToUI(R"({"action":"STATUS","payload":"An app could not return to a normal window and has been left open. Restore it manually and try the biome again."})");
+                    check = checks.erase(check); continue;
+                }
+                // SW_RESTORE can bring a minimized window back maximized. Request
+                // the normal state on a later turn instead of waiting forever for
+                // that first restore to also unmaximize it. Bound retries and do
+                // not alter the session's original WINDOWPLACEMENT or app styles.
+                if (check->restoreAttempts < 3) {
+                    ++check->restoreAttempts;
+                    const BOOL requested = ShowWindowAsync(check->hwnd, SW_SHOWNOACTIVATE);
+                    const DWORD error = requested ? ERROR_SUCCESS : GetLastError();
+                    if (placementGeneration != g_pendingGeneration) return;
+                    TrackerLog("normal restore requested pid=" + to_string(pid) +
+                               " attempt=" + to_string(check->restoreAttempts) +
+                               " minimized=" + to_string(minimized) + " maximized=" + to_string(maximized) +
+                               " error=" + to_string(error));
+                }
+                check->due = GetTickCount64() + 1000;
+                ++check; continue;
+            }
+            // Restore and resize are separate turns of the target's message loop.
+            check->waitingRestore = false;
+            RequestTargetPlacement(check->hwnd, target, "after restore", true);
+            check->due = GetTickCount64() + 1000;
+            ++check; continue;
+        }
+        if (check->returnFromRefresh) {
+            check->returnFromRefresh = false;
+            RequestTargetPlacement(check->hwnd, target, "renderer return");
+            check->due = GetTickCount64() + 1000;
+            ++check; continue;
+        }
+        const bool fits = abs(actual.left - target.left) <= 16 && abs(actual.top - target.top) <= 16 &&
+            abs(actual.right - target.right) <= 16 && abs(actual.bottom - target.bottom) <= 16;
+        if (fits) {
+            if (check->refreshNotion && target.right-target.left > 2) {
+                // One real size transition lets Notion relayout its renderer even
+                // when the outer HWND already matches. Never synthesize WM_SIZE
+                // with stale dimensions or resize the application's child HWNDs.
+                check->refreshNotion = false;
+                RECT refreshTarget = target;
+                --refreshTarget.right;
+                if (RequestTargetPlacement(check->hwnd, refreshTarget, "renderer refresh")) {
+                    check->returnFromRefresh = true;
+                    check->due = GetTickCount64() + 500;
+                    ++check; continue;
+                }
+            }
+            // Schedule painting; do not synchronously call into a hung renderer.
+            const auto startup = find_if(g_pendingSnaps.begin(), g_pendingSnaps.end(),
+                [&](const PendingSnap& pending) { return pending.snappedHwnd == check->hwnd && pending.provisionalWindow &&
+                    (pending.candidateTitle == "Welcome" || pending.candidateTitle.find("Welcome to ") == 0 ||
+                     pending.candidateTitle == "Select Project" || pending.candidateTitle == "Open Project"); });
+            WindowScaler::ReportLaunchState(check->zone, startup == g_pendingSnaps.end() ? "ready" : "waiting",
+                startup == g_pendingSnaps.end() ? "" : "Choose a project in the app.");
+            RedrawWindow(check->hwnd, nullptr, nullptr, RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
+            RECT client{};
+            GetClientRect(check->hwnd, &client);
+            TrackerLog("placement settled pid=" + to_string(pid) + " client=" +
+                       to_string(client.right) + "x" + to_string(client.bottom) +
+                       " actual=" + RectDescription(actual) + " dpi=" + to_string(GetDpiForWindow(check->hwnd)));
+            check = checks.erase(check); continue;
+        }
+        if (++check->retries >= 2) {
+            const bool positioned = abs(actual.left - target.left) <= 16 && abs(actual.top - target.top) <= 16;
+            const auto startup = find_if(g_pendingSnaps.begin(), g_pendingSnaps.end(),
+                [&](const PendingSnap& pending) { return pending.snappedHwnd == check->hwnd && pending.provisionalWindow &&
+                    (pending.candidateTitle == "Welcome" || pending.candidateTitle.find("Welcome to ") == 0 ||
+                     pending.candidateTitle == "Select Project" || pending.candidateTitle == "Open Project"); });
+            WindowScaler::ReportLaunchState(check->zone, startup != g_pendingSnaps.end() ? "waiting" : positioned ? "constrained" : "failed",
+                startup != g_pendingSnaps.end() ? "Choose a project in the app." : positioned
+                    ? "Opened with the app's size limits." : "App opened, but did not accept its assigned position.");
+            // Keep the app open at the size it accepts. Do not repeatedly force
+            // its frame, clip its controls, or reposition neighboring windows.
+            TrackerLog("placement mismatch; left open hwnd=" + to_string(reinterpret_cast<uintptr_t>(check->hwnd)) +
+                " target=" + RectDescription(target) + " actual=" + RectDescription(actual) +
+                " state=" + DescribeWindowState(check->hwnd, actual) +
+                " dpi=" + to_string(GetDpiForWindow(check->hwnd)));
+            check = checks.erase(check); continue;
+        }
+        RequestTargetPlacement(check->hwnd, target, "verification retry");
+        check->due = GetTickCount64() + 1000;
+        ++check;
+    }
+    if (placementGeneration != g_pendingGeneration) return;
+    for (const auto& remaining : checks) {
+        if (none_of(g_placementChecks.begin(), g_placementChecks.end(),
+                    [&](const PlacementCheck& item) { return item.hwnd == remaining.hwnd; }))
+            g_placementChecks.push_back(remaining);
+    }
+    for (auto job = g_launchJobs.begin(); job != g_launchJobs.end();) {
+        if (!job->result->done.load()) { ++job; continue; }
+        auto pending = find_if(g_pendingSnaps.begin(), g_pendingSnaps.end(),
+            [&](const PendingSnap& item) { return item.id == job->id; });
+        if (pending != g_pendingSnaps.end()) {
+            if (job->result->success) {
+                pending->launchPid = job->result->pid;
+                pending->deadline = GetTickCount64() + 300000;
+                TrackerLog("launch accepted id=" + to_string(job->id) + " pid=" + to_string(pending->launchPid));
+            } else {
+                TrackerLog("launch failed id=" + to_string(job->id) + " " + job->result->error);
+                WindowScaler::ReportLaunchState(pending->box, "failed", "Windows could not launch this app. Check the local log.");
+                g_pendingSnaps.erase(pending);
+            }
+        }
+        job = g_launchJobs.erase(job);
+    }
+    // Work on an ID snapshot: monitor lookup may dispatch callbacks, so no live
+    // vector iterator may span it. Drop missing zones before launching or matching.
+    const auto monitorSnapshot = g_pendingSnaps;
+    for (const auto& pending : monitorSnapshot) {
+        RECT target{};
+        const bool available = CalculateTargetRect(pending.box, target);
+        if (placementGeneration != g_pendingGeneration) return;
+        if (available) continue;
+        WindowScaler::ReportLaunchState(pending.box, "skipped", "Monitor disconnected.");
+        for (const auto& job : g_launchJobs)
+            if (job.id == pending.id) job.result->cancelled.store(true);
+        g_pendingSnaps.erase(remove_if(g_pendingSnaps.begin(), g_pendingSnaps.end(),
+            [&](const PendingSnap& item) { return item.id == pending.id; }), g_pendingSnaps.end());
+        TrackerLog("launch/tracking skipped: monitor unavailable id=" + to_string(pending.id));
+    }
+    for (auto& pending : g_pendingSnaps) {
+        if (g_launchJobs.size() >= 3) break;
+        if (pending.dispatched) continue;
+        auto result = make_shared<LaunchResult>();
+        auto context = make_unique<LaunchContext>(LaunchContext{pending.box, pending.fullPath, result});
+        g_launchJobs.push_back({pending.id, result});
+        if (!TrySubmitThreadpoolCallback(LaunchWorker, context.get(), nullptr)) {
+            g_launchJobs.pop_back();
+            WindowScaler::ReportLaunchState(pending.box, "failed", "Could not schedule the app launch.");
+            pending.dispatched = true;
+            pending.deadline = GetTickCount64();
+            TrackerLog("worker submission failed " + to_string(GetLastError()));
             break;
         }
-
-        if (!candidateHwnd) {
-            ++it;
+        context.release();
+        pending.dispatched = true;
+    }
+    const auto generation = g_pendingGeneration;
+    const auto pendingSnapshot = g_pendingSnaps;
+    const auto windows = WindowScaler::GetActiveWindows();
+    for (const auto& pending : pendingSnapshot) {
+        if (generation != g_pendingGeneration) return;
+        auto findPending = [&]() {
+            return find_if(g_pendingSnaps.begin(), g_pendingSnaps.end(),
+                           [&](const PendingSnap& item) { return item.id == pending.id; });
+        };
+        if (findPending() == g_pendingSnaps.end()) continue;
+        if (!pending.dispatched || pending.deadline == 0) continue;
+        if (GetTickCount64() >= pending.deadline) {
+            const auto progressItem = g_launchProgress.items.find(LaunchProgressState::Key(pending.box));
+            if (progressItem != g_launchProgress.items.end() &&
+                (progressItem->second.state == "opening" || progressItem->second.state == "waiting"))
+                WindowScaler::ReportLaunchState(pending.box, "failed", "Timed out waiting for a workspace window.");
+            TrackerLog(string(pending.snappedHwnd ? "tracking completed id=" : "timeout id=") + to_string(pending.id) + " app=" + pending.exeName);
+            g_pendingSnaps.erase(findPending());
             continue;
         }
-
-        WindowScaler::CacheBiomeAppPreState(candidateHwnd, true);
-        if (WindowScaler::ForceSnapToBox(candidateHwnd, it->box)) {
-            g_pendingClaimedWindows.insert(candidateHwnd);
-            cout << "[LAUNCHER] Deferred workspace snap completed for " << it->exeName << endl;
-            it = g_pendingSnaps.erase(it);
-        } else {
-            cerr << "[LAUNCHER] Deferred workspace snap failed for " << it->exeName << endl;
-            ++it;
+        DWORD currentPid = 0;
+        if (pending.snappedHwnd) GetWindowThreadProcessId(pending.snappedHwnd, &currentPid);
+        const bool currentAlive = pending.snappedHwnd && currentPid == pending.snappedPid;
+        // Never undo a user's minimize, or keep chasing normal document changes.
+        if (currentAlive && (IsIconic(pending.snappedHwnd) ||
+            (IsWindowVisible(pending.snappedHwnd) && !pending.provisionalWindow))) continue;
+        if (pending.snappedHwnd && currentPid != pending.snappedPid)
+            g_pendingClaimedWindows.erase(pending.snappedHwnd);
+        HWND candidate = nullptr;
+        const WindowInfo* candidateInfo = nullptr;
+        int bestScore = -1;
+        bool ambiguous = false;
+        for (const auto& window : windows) {
+            const bool ownProvisional = currentAlive && pending.provisionalWindow &&
+                                        window.hwnd == pending.snappedHwnd;
+            if (pending.knownWindows.count(window.hwnd) ||
+                (g_pendingClaimedWindows.count(window.hwnd) && !ownProvisional)) continue;
+            if (currentAlive && IsWindowVisible(pending.snappedHwnd) &&
+                pending.provisionalWindow && IsStartupCandidate(window)) continue;
+            const int score = CandidateScore(pending, window);
+            if (score < 0 || !IsWorkspaceCandidate(window.hwnd)) continue;
+            if (score > bestScore) {
+                bestScore = score;
+                candidate = window.hwnd;
+                candidateInfo = &window;
+                ambiguous = false;
+            } else if (score == bestScore) ambiguous = true;
+        }
+        if (!candidate || ambiguous) {
+            auto reset = findPending();
+            if (reset != g_pendingSnaps.end()) {
+                reset->candidateHwnd = nullptr;
+                reset->candidateSince = 0;
+            }
+            continue;
+        }
+        auto stable = findPending();
+        if (stable == g_pendingSnaps.end()) continue;
+        if (stable->candidateHwnd != candidate || stable->candidateTitle != candidateInfo->title ||
+            !EqualRect(&stable->candidateRect, &candidateInfo->rect)) {
+            stable->candidateHwnd = candidate;
+            stable->candidateRect = candidateInfo->rect;
+            stable->candidateTitle = candidateInfo->title;
+            stable->candidateSince = GetTickCount64();
+            continue;
+        }
+        if (GetTickCount64() - stable->candidateSince < 1000) continue;
+        // Never retain a vector iterator/reference across Win32 calls.
+        WindowScaler::CacheBiomeAppPreState(candidate, true);
+        if (generation != g_pendingGeneration) return;
+        const bool placed = WindowScaler::ForceSnapToBox(candidate, pending.box);
+        if (generation != g_pendingGeneration) return;
+        auto current = findPending();
+        if (current == g_pendingSnaps.end()) continue;
+        if (placed) {
+            g_pendingClaimedWindows.insert(candidate);
+            TrackerLog("placement requested id=" + to_string(pending.id) + " app=" + pending.exeName);
+            current->snappedHwnd = candidate;
+            current->provisionalWindow = IsStartupCandidate(*candidateInfo);
+            current->candidateHwnd = nullptr;
+            current->candidateSince = 0;
+            TrackerLog(string(current->provisionalWindow ? "startup window tracked id=" : "workspace bound id=") +
+                       to_string(pending.id));
+            // The placement HWND can belong to ApplicationFrameHost, whereas
+            // WindowInfo identifies the inner packaged process.
+            GetWindowThreadProcessId(candidate, &current->snappedPid);
         }
     }
     StopPendingHooksIfIdle();
 }
 
-void CALLBACK PendingWinEventProc(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG objectId,
-                                  LONG childId, DWORD, DWORD) {
-    if (objectId != OBJID_WINDOW || childId != CHILDID_SELF || !hwnd) return;
-    if (event != EVENT_OBJECT_SHOW && event != EVENT_OBJECT_NAMECHANGE &&
-        event != EVENT_SYSTEM_FOREGROUND) {
-        return;
+void CALLBACK PendingTimerProc(HWND, UINT, UINT_PTR timer, DWORD) {
+    if (timer != g_pendingTimer) return;
+    if (!g_scanRequested && GetTickCount64() - g_lastScan < 2000) return;
+    if (g_processingPending || g_trackingPaused) return;
+    g_scanRequested = false;
+    g_lastScan = GetTickCount64();
+    try {
+        ProcessPendingSnaps();
+    } catch (const exception& error) {
+        try { TrackerLog(string("exception: ") + error.what()); } catch (...) {}
+        WindowScaler::CancelPendingLaunches();
+    } catch (...) {
+        WindowScaler::CancelPendingLaunches();
     }
-    ProcessPendingSnaps(GetAncestor(hwnd, GA_ROOT));
+}
+
+void CALLBACK PendingWinEventProc(HWINEVENTHOOK, DWORD, HWND, LONG, LONG, DWORD, DWORD) {
+    // Deliberately do not enumerate, place or mutate state in a WinEvent callback.
+    // The owner-thread timer coalesces notifications and reconciles missed events.
+    g_scanRequested = true;
 }
 
 bool EnsurePendingHooks() {
+    if (!g_pendingTimer) g_pendingTimer = SetTimer(nullptr, 0, 500, PendingTimerProc);
     if (!g_pendingObjectHook) {
-        g_pendingObjectHook = SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_NAMECHANGE,
+        g_pendingObjectHook = SetWinEventHook(EVENT_OBJECT_DESTROY, EVENT_OBJECT_NAMECHANGE,
                                               nullptr, PendingWinEventProc, 0, 0,
                                               WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     }
@@ -232,7 +693,9 @@ bool EnsurePendingHooks() {
                                                   nullptr, PendingWinEventProc, 0, 0,
                                                   WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     }
-    return g_pendingObjectHook && g_pendingForegroundHook;
+    const bool ready = g_pendingTimer && g_pendingObjectHook && g_pendingForegroundHook;
+    if (!ready) StopPendingHooksIfIdle();
+    return ready;
 }
 
 BOOL CALLBACK FindPackagedChildWindow(HWND hwnd, LPARAM parameter) {
@@ -266,124 +729,6 @@ int WindowArea(const RECT& r) {
     return static_cast<int>(w) * static_cast<int>(h);
 }
 
-bool RectCoversMonitor(const RECT& windowRect, const RECT& monitorRect, double minCoverage = 0.92) {
-    const int monArea = WindowArea(monitorRect);
-    if (monArea <= 0) return false;
-
-    RECT overlap{};
-    if (!IntersectRect(&overlap, &windowRect, &monitorRect)) return false;
-
-    const double coverage = static_cast<double>(WindowArea(overlap)) / static_cast<double>(monArea);
-    if (coverage < minCoverage) return false;
-
-    // Also require window to be roughly monitor-sized (not a small centered dialog).
-    const int winArea = WindowArea(windowRect);
-    return winArea >= static_cast<int>(monArea * 0.85);
-}
-
-bool IsEffectivelyFullscreen(HWND hwnd) {
-    if (!hwnd || !IsWindow(hwnd)) return false;
-    if (IsZoomed(hwnd)) return true;
-
-    const LONG_PTR style = GetWindowLongPtr(hwnd, GWL_STYLE);
-    if (style & WS_MAXIMIZE) return true;
-
-    RECT wr{};
-    if (!GetWindowRect(hwnd, &wr)) return false;
-
-    HMONITOR mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-    MONITORINFO mi{};
-    mi.cbSize = sizeof(mi);
-    if (!GetMonitorInfo(mon, &mi)) return false;
-
-    return RectCoversMonitor(wr, mi.rcMonitor) || RectCoversMonitor(wr, mi.rcWork);
-}
-
-bool RectCloseToTarget(const RECT& actual, const RECT& target, int pad = 48) {
-    return abs(actual.left - target.left) <= pad &&
-           abs(actual.top - target.top) <= pad &&
-           abs((actual.right - actual.left) - (target.right - target.left)) <= pad * 2 &&
-           abs((actual.bottom - actual.top) - (target.bottom - target.top)) <= pad * 2;
-}
-
-void PumpMessagesMs(int totalMs) {
-    const DWORD start = GetTickCount();
-    while (static_cast<int>(GetTickCount() - start) < totalMs) {
-        MSG msg{};
-        while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
-            if (msg.message == WM_QUIT) {
-                PostQuitMessage(static_cast<int>(msg.wParam));
-                return;
-            }
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
-        }
-        Sleep(20);
-    }
-}
-
-// Obsidian/Electron F11 fullscreen is NOT IsZoomed — must exit before SetWindowPos.
-void ExitFullscreenOrMaximized(HWND hwnd, bool fragile) {
-    if (!hwnd || !IsWindow(hwnd)) return;
-
-    if (IsIconic(hwnd)) {
-        ShowWindow(hwnd, SW_RESTORE);
-        PumpMessagesMs(fragile ? 80 : 40);
-    }
-
-    if (IsZoomed(hwnd) || (GetWindowLongPtr(hwnd, GWL_STYLE) & WS_MAXIMIZE)) {
-        ShowWindow(hwnd, SW_RESTORE);
-        SendMessage(hwnd, WM_SYSCOMMAND, SC_RESTORE, 0);
-        PumpMessagesMs(fragile ? 100 : 50);
-    }
-
-    if (!IsEffectivelyFullscreen(hwnd)) return;
-
-    cout << "[SCALER] Exiting fullscreen before snap (HWND " << hwnd << ")" << endl;
-
-    // 1) Standard restore
-    ShowWindow(hwnd, SW_RESTORE);
-    SendMessage(hwnd, WM_SYSCOMMAND, SC_RESTORE, 0);
-    PumpMessagesMs(80);
-
-    if (!IsEffectivelyFullscreen(hwnd)) return;
-
-    // 2) Electron/Obsidian often use F11 for exclusive fullscreen
-    SetForegroundWindow(hwnd);
-    PumpMessagesMs(40);
-    PostMessage(hwnd, WM_KEYDOWN, VK_F11, 0x00150001);
-    PostMessage(hwnd, WM_KEYUP, VK_F11, 0xC0150001);
-    PumpMessagesMs(fragile ? 220 : 120);
-
-    if (!IsEffectivelyFullscreen(hwnd)) return;
-
-    // 3) Escape can leave HTML/document fullscreen inside Chromium hosts
-    PostMessage(hwnd, WM_KEYDOWN, VK_ESCAPE, 0x00010001);
-    PostMessage(hwnd, WM_KEYUP, VK_ESCAPE, 0xC0010001);
-    PumpMessagesMs(120);
-
-    if (!IsEffectivelyFullscreen(hwnd)) return;
-
-    // 4) Last resort: force a non-maximized normal placement slightly inset,
-    // then the real zone snap can take over. Avoid SetWindowLongPtr on fragile hosts.
-    HMONITOR mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-    MONITORINFO mi{};
-    mi.cbSize = sizeof(mi);
-    if (GetMonitorInfo(mon, &mi)) {
-        const RECT& w = mi.rcWork;
-        const int inset = 80;
-        SetWindowPos(
-            hwnd,
-            HWND_TOP,
-            w.left + inset,
-            w.top + inset,
-            (std::max)(400, static_cast<int>((w.right - w.left) - inset * 2)),
-            (std::max)(300, static_cast<int>((w.bottom - w.top) - inset * 2)),
-            SWP_SHOWWINDOW | SWP_FRAMECHANGED
-        );
-        PumpMessagesMs(100);
-    }
-}
 
 } // namespace
 
@@ -498,9 +843,9 @@ vector<WindowInfo> WindowScaler::GetActiveWindows() {
         WindowInfo info;
         info.hwnd = identity.placementHwnd;
 
-        char title[512];
-        GetWindowTextA(hwnd, title, sizeof(title));
-        info.title = title;
+        wchar_t title[1024]{};
+        GetWindowTextW(hwnd, title, 1024);
+        info.title = WideToUtf8(title);
         GetWindowRect(hwnd, &info.rect);
         info.processId = identity.processId;
         info.processPath = identity.processPath;
@@ -532,6 +877,7 @@ void WindowScaler::CacheBiomeAppPreState(HWND hwnd, bool launchedFresh) {
 
     BiomeAppSession session;
     session.hwnd = hwnd;
+    GetWindowThreadProcessId(hwnd, &session.processId);
     session.hadPreBiomeState = !launchedFresh;
 
     if (!launchedFresh) {
@@ -546,21 +892,26 @@ void WindowScaler::CacheBiomeAppPreState(HWND hwnd, bool launchedFresh) {
     s_biomeAppSessions[hwnd] = session;
 }
 
-bool WindowScaler::ComputeTargetRect(const SelectedBox& box, RECT& outTarget) {
+namespace {
+bool CalculateTargetRect(const SelectedBox& box, RECT& outTarget) {
+    if (!std::isfinite(box.relX) || !std::isfinite(box.relY) ||
+        !std::isfinite(box.relWidth) || !std::isfinite(box.relHeight) ||
+        box.relX < 0 || box.relY < 0 || box.relWidth <= 0 || box.relHeight <= 0 ||
+        box.relX + box.relWidth > 1.0001f || box.relY + box.relHeight > 1.0001f) return false;
     RECT work{};
-    if (!MonitorManager::GetWorkAreaForBox(box.monitorIndex, box.monitorDevice, box.stableMonitorId, work)) {
-        cerr << "[SCALER] Monitor unavailable for zone " << box.id << endl;
+    if (!MonitorManager::GetWorkAreaForBox(box.monitorIndex, box.monitorDevice, box.stableMonitorId, work))
         return false;
-    }
-
-    const int monWidth = work.right - work.left;
-    const int monHeight = work.bottom - work.top;
-
-    outTarget.left = work.left + static_cast<int>(box.relX * monWidth);
-    outTarget.top = work.top + static_cast<int>(box.relY * monHeight);
-    outTarget.right = outTarget.left + static_cast<int>(box.relWidth * monWidth);
-    outTarget.bottom = outTarget.top + static_cast<int>(box.relHeight * monHeight);
-    return true;
+    const LONG width = work.right - work.left, height = work.bottom - work.top;
+    if (width <= 0 || height <= 0) return false;
+    outTarget.left = work.left + static_cast<LONG>(box.relX * width);
+    outTarget.top = work.top + static_cast<LONG>(box.relY * height);
+    outTarget.right = work.left + static_cast<LONG>(std::min(1.0f, box.relX + box.relWidth) * width);
+    outTarget.bottom = work.top + static_cast<LONG>(std::min(1.0f, box.relY + box.relHeight) * height);
+    return outTarget.right > outTarget.left && outTarget.bottom > outTarget.top;
+}
+}
+bool WindowScaler::ComputeTargetRect(const SelectedBox& box, RECT& outTarget) {
+    return CalculateTargetRect(box, outTarget);
 }
 
 bool WindowScaler::ApplyPlacementRect(HWND hwnd, const RECT& screenRect) {
@@ -592,87 +943,37 @@ bool WindowScaler::ApplyPlacementRect(HWND hwnd, const RECT& screenRect) {
 }
 
 bool WindowScaler::ForceSnapToBox(HWND hwnd, const SelectedBox& box) {
+    const auto generation = g_pendingGeneration;
     if (!hwnd || !IsWindow(hwnd)) return false;
-
     RECT target{};
     if (!ComputeTargetRect(box, target)) return false;
-
-    const int width = target.right - target.left;
-    const int height = target.bottom - target.top;
-    if (width <= 0 || height <= 0) return false;
-
-    string processName;
-    string processPath;
+    const int width = target.right - target.left, height = target.bottom - target.top;
+    if (width <= 0 || height <= 0 || !EnsurePendingHooks()) return false;
+    ReportLaunchState(box, "opening", "Placing the workspace window.");
     DWORD pid = 0;
     GetWindowThreadProcessId(hwnd, &pid);
+    // Restore standard minimized/maximized state without toggling F11 or Escape.
+    // A normal window filling rcWork is not necessarily application fullscreen.
+    const bool restoring = IsIconic(hwnd) || IsZoomed(hwnd);
+    RECT initial{};
+    if (GetWindowRect(hwnd, &initial))
+        TrackerLog("placement begin pid=" + to_string(pid) + " state=" + DescribeWindowState(hwnd, initial) +
+                   " actual=" + RectDescription(initial) + " target=" + RectDescription(target));
+    if (restoring && !ShowWindowAsync(hwnd, SW_RESTORE)) return false;
+    if (!restoring && !RequestTargetPlacement(hwnd, target, "initial", true)) {
+        return false;
+    }
+    if (generation != g_pendingGeneration || !IsWindow(hwnd)) return false;
+    g_placementChecks.erase(remove_if(g_placementChecks.begin(), g_placementChecks.end(),
+        [&](const PlacementCheck& check) { return check.hwnd == hwnd; }), g_placementChecks.end());
+    string processPath, processName;
     QueryProcessImage(pid, processPath, processName);
-    const bool fragile = AppLauncher::IsFragileElectronHost(processName) ||
-                         AppLauncher::IsFragileElectronHost(box.exeName) ||
-                         AppLauncher::IsFragileElectronHost(box.assignedApp);
-
-    // Obsidian F11 / maximized / borderless fullscreen must exit before SetWindowPos.
-    ExitFullscreenOrMaximized(hwnd, fragile);
-
-    if (!fragile) {
-        LONG_PTR style = GetWindowLongPtr(hwnd, GWL_STYLE);
-        if (style & WS_MAXIMIZE) {
-            SetWindowLongPtr(hwnd, GWL_STYLE, style & ~WS_MAXIMIZE);
-            SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
-                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
-        }
-    }
-
-    auto placeOnce = [&](UINT flags) -> bool {
-        return SetWindowPos(
-                   hwnd,
-                   HWND_TOP,
-                   target.left,
-                   target.top,
-                   width,
-                   height,
-                   flags) != FALSE;
-    };
-
-    // First attempt: show without forcing activation (safer for Notion).
-    UINT flags = SWP_SHOWWINDOW | SWP_FRAMECHANGED | SWP_NOCOPYBITS;
-    if (fragile && !IsEffectivelyFullscreen(hwnd)) {
-        flags |= SWP_NOACTIVATE;
-    }
-
-    if (!placeOnce(flags)) {
-        cerr << "[SCALER] SetWindowPos failed (" << GetLastError() << ")" << endl;
-        if (!ApplyPlacementRect(hwnd, target)) return false;
-    }
-
-    PumpMessagesMs(fragile ? 60 : 30);
-    placeOnce(SWP_SHOWWINDOW | SWP_FRAMECHANGED);
-
-    RECT after{};
-    GetWindowRect(hwnd, &after);
-    if (!RectCloseToTarget(after, target) || IsEffectivelyFullscreen(hwnd)) {
-        cout << "[SCALER] Snap miss — retry after forcing windowed mode" << endl;
-        ExitFullscreenOrMaximized(hwnd, fragile);
-        placeOnce(SWP_SHOWWINDOW | SWP_FRAMECHANGED);
-        PumpMessagesMs(80);
-        placeOnce(SWP_SHOWWINDOW | SWP_FRAMECHANGED);
-        GetWindowRect(hwnd, &after);
-    }
-
-    HMONITOR expected = MonitorFromRect(&target, MONITOR_DEFAULTTONEAREST);
-    HMONITOR actual = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-    if (expected && actual && expected != actual) {
-        cout << "[SCALER] Retry snap — window landed on wrong monitor" << endl;
-        ExitFullscreenOrMaximized(hwnd, fragile);
-        placeOnce(SWP_SHOWWINDOW | SWP_FRAMECHANGED);
-    }
-
-    cout << "[SCALER] ForceSnap HWND " << hwnd
-         << (fragile ? " (electron)" : "")
-         << " mon=" << box.monitorIndex
-         << " (" << box.monitorDevice << ")"
-         << " -> LTRB "
-         << target.left << "," << target.top << "," << target.right << "," << target.bottom
-         << endl;
+    const bool notion = _stricmp(processName.c_str(), "Notion.exe") == 0;
+    if (generation != g_pendingGeneration || !IsWindow(hwnd)) return false;
+    g_placementChecks.push_back({hwnd, pid, target, GetTickCount64() + 1000, 0,
+                                 restoring, GetTickCount64() + 8000, notion, false, box});
+    g_scanRequested = true;
+    // This acknowledges a request; the timer verifies its actual applied rectangle.
     return true;
 }
 
@@ -732,10 +1033,15 @@ void WindowScaler::CloseBiomeSession() {
     CancelPendingLaunches();
     cout << "[SESSION] Closing biome session (" << s_biomeAppSessions.size() << " apps)..." << endl;
 
-    for (const auto& entry : s_biomeAppSessions) {
+    auto sessions = std::move(s_biomeAppSessions);
+    s_biomeAppSessions.clear();
+    for (const auto& entry : sessions) {
         HWND hwnd = entry.first;
         const BiomeAppSession& session = entry.second;
         if (!hwnd || !IsWindow(hwnd)) continue;
+        DWORD pid = 0;
+        GetWindowThreadProcessId(hwnd, &pid);
+        if (pid != session.processId) continue;
 
         if (session.hadPreBiomeState) {
             WINDOWPLACEMENT placement = session.preBiomePlacement;
@@ -747,7 +1053,6 @@ void WindowScaler::CloseBiomeSession() {
         ShowWindow(hwnd, SW_MINIMIZE);
     }
 
-    s_biomeAppSessions.clear();
     // Intentionally leave s_cleanSlateMinimized untouched — non-biome apps stay minimized.
 }
 
@@ -1012,6 +1317,7 @@ bool WindowScaler::LaunchAndTrackApp(const string& assignedApp,
                                      const unordered_set<HWND>& excludeHwnds,
                                      string& outError) {
     outError.clear();
+    const auto generation = g_pendingGeneration;
     if (IsUnsupportedUwpBinding(assignedApp)) {
         outError = "ApplicationFrameHost.exe is not a launchable app identity";
         return false;
@@ -1025,6 +1331,7 @@ bool WindowScaler::LaunchAndTrackApp(const string& assignedApp,
                           AppLauncher::IsObsidianExe(box.assignedApp);
 
     PendingSnap pending;
+    pending.id = ++g_nextPendingId;
     pending.box = box;
     pending.exeName = exeName;
     pending.knownWindows = excludeHwnds;
@@ -1036,71 +1343,60 @@ bool WindowScaler::LaunchAndTrackApp(const string& assignedApp,
         outError = "Store app has no resolvable AUMID";
         return false;
     }
+    // Identity resolution and HWND enumeration can dispatch callbacks. Never
+    // attach work from a cancelled session to the session that replaced it.
+    if (generation != g_pendingGeneration) {
+        outError = "workspace launch cancelled during identity resolution";
+        return false;
+    }
     if (!EnsurePendingHooks()) {
         outError = "could not install workspace window tracker";
         return false;
     }
 
-    g_pendingSnaps.push_back(std::move(pending));
-    PendingSnap& queued = g_pendingSnaps.back();
-    DWORD pid = 0;
-    bool launched = false;
-
-    if (obsidian) {
-        const string uri = AppLauncher::ResolveObsidianLaunchUri(box);
-        if (uri.empty()) {
-            outError = "Obsidian vault could not be resolved";
-        } else {
-            launched = AppLauncher::LaunchObsidianWithUri(uri, pid);
-        }
-    } else if (packaged) {
-        launched = AppLauncher::LaunchPackagedAppForBox(box, pid);
-    } else if (FileExists(fullPath)) {
-        STARTUPINFOA startup{};
-        startup.cb = sizeof(startup);
-        PROCESS_INFORMATION process{};
-        string commandLine = "\"" + fullPath + "\"";
-        vector<char> commandBuffer(commandLine.begin(), commandLine.end());
-        commandBuffer.push_back('\0');
-        launched = CreateProcessA(fullPath.c_str(), commandBuffer.data(), nullptr, nullptr,
-                                  FALSE, 0, nullptr, nullptr, &startup, &process) != FALSE;
-        if (launched) {
-            pid = process.dwProcessId;
-            CloseHandle(process.hThread);
-            CloseHandle(process.hProcess);
-        } else {
-            SHELLEXECUTEINFOA shell{};
-            shell.cbSize = sizeof(shell);
-            shell.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
-            shell.lpVerb = "open";
-            shell.lpFile = fullPath.c_str();
-            shell.nShow = SW_SHOWNORMAL;
-            launched = ShellExecuteExA(&shell) != FALSE;
-            if (launched && shell.hProcess) {
-                pid = GetProcessId(shell.hProcess);
-                CloseHandle(shell.hProcess);
-            }
-        }
-    } else {
-        outError = "application path does not exist";
-    }
-
-    if (!launched) {
-        if (outError.empty()) outError = "launch trigger failed (" + to_string(GetLastError()) + ")";
-        g_pendingSnaps.pop_back();
+    pending.fullPath = fullPath;
+    pending.deadline = 0; // Starts only after the background launch completes.
+    if (generation != g_pendingGeneration) {
         StopPendingHooksIfIdle();
+        outError = "workspace launch cancelled before queueing";
         return false;
     }
-
-    queued.launchPid = pid;
-    cout << "[LAUNCHER] Started async workspace tracking for " << exeName
-         << " (PID " << pid << ")" << endl;
-    ProcessPendingSnaps();
+    g_pendingSnaps.push_back(std::move(pending));
+    g_scanRequested = true;
     return true;
 }
 
 void WindowScaler::CancelPendingLaunches() {
+    if (g_launchProgress.active) {
+        g_launchProgress.active = false;
+        if (g_progressCallback) g_progressCallback(g_launchProgress.Snapshot().dump());
+    }
+    ++g_pendingGeneration;
+    for (const auto& job : g_launchJobs) job.result->cancelled.store(true);
     g_pendingSnaps.clear();
+    g_placementChecks.clear();
     g_pendingClaimedWindows.clear();
     StopPendingHooksIfIdle();
+}
+
+void WindowScaler::PauseLaunchTracking(bool paused) {
+    g_trackingPaused = paused;
+    if (!paused) g_scanRequested = true;
+}
+
+void WindowScaler::SetLaunchProgressCallback(std::function<void(const string&)> callback) {
+    g_progressCallback = std::move(callback);
+}
+void WindowScaler::BeginLaunchProgress(const string& name, const vector<SelectedBox>& boxes) {
+    g_launchProgress.Begin(name, boxes);
+    g_progressDeadline = GetTickCount64() + 300000;
+    if (g_progressCallback) g_progressCallback(g_launchProgress.Snapshot().dump());
+}
+void WindowScaler::FinishLaunchSetup() {
+    g_launchProgress.sealed = true;
+    if (g_progressCallback) g_progressCallback(g_launchProgress.Snapshot().dump());
+}
+void WindowScaler::ReportLaunchState(const SelectedBox& box, const string& state, const string& detail) {
+    if (g_launchProgress.Update(box, state, detail) && g_progressCallback)
+        g_progressCallback(g_launchProgress.Snapshot().dump());
 }
