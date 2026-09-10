@@ -13,6 +13,12 @@ add_executable(Biomes WIN32
     src/core/json_manager.cpp
     src/core/app_paths.cpp
     src/core/legacy_data_migration.cpp
+    src/core/background_host.cpp
+    src/core/native_settings.cpp
+    src/core/single_instance.cpp
+    src/core/startup_options.cpp
+    src/core/startup_registration.cpp
+    src/ui/tray_manager.cpp
     src/core/monitor_manager.cpp
     src/core/window_scaler.cpp
     src/core/app_launcher.cpp
@@ -56,6 +62,14 @@ if(BIOMES_BUILD_TESTS)
     foreach(scenario paths migrate existing invalid locked once wrongtype)
         add_test(NAME storage_${scenario} COMMAND BiomesStorageTests ${scenario})
     endforeach()
+    add_executable(BiomesLifecycleTests tests/lifecycle_tests.cpp
+        src/core/app_paths.cpp src/core/background_host.cpp src/core/native_settings.cpp
+        src/core/single_instance.cpp src/core/startup_options.cpp src/core/startup_registration.cpp src/ui/tray_manager.cpp)
+    target_include_directories(BiomesLifecycleTests PRIVATE include)
+    target_compile_definitions(BiomesLifecycleTests PRIVATE BIOMES_STORAGE_TESTING)
+    target_link_libraries(BiomesLifecycleTests PRIVATE ole32 shell32 advapi32 user32)
+    add_test(NAME lifecycle_regressions COMMAND BiomesLifecycleTests)
+    set_tests_properties(lifecycle_regressions PROPERTIES TIMEOUT 30)
 endif()
 
 add_custom_target(BiomesAssets ALL

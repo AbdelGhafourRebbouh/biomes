@@ -16,6 +16,9 @@ public:
     
     // Process Windows message loop
     static void RunMessageLoop();
+    static void Shutdown();
+    static void SetShowRequestedCallback(std::function<void()> callback);
+    static void SetCloseRequestedCallback(std::function<void()> callback);
 
     // Restore and focus the dashboard after a full-screen native editor closes.
     static void RestoreDashboard();

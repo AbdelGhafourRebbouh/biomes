@@ -19,6 +19,9 @@ namespace {
 constexpr UINT kDispatchWebMessage = WM_APP + 71;
 std::deque<std::string> pendingWebMessages;
 bool dispatchingWebMessage = false;
+std::function<void()> showRequested, closeRequested;
+bool shuttingDown = false;
+std::wstring trustedPage;
 }
 
 // ============================================================================
@@ -154,6 +157,11 @@ std::function<void(int)> WebViewWindow::s_onHotkeyPressed = nullptr;
 std::function<void()> WebViewWindow::s_onDisplayChanged = nullptr;
 
 bool WebViewWindow::Initialize(HINSTANCE hInstance, int nCmdShow, const std::string& startUrl) {
+    if (s_hwnd) return true;
+    if (shuttingDown) return false;
+    const int urlLength = MultiByteToWideChar(CP_UTF8, 0, startUrl.data(), static_cast<int>(startUrl.size()), nullptr, 0);
+    trustedPage.resize(urlLength);
+    MultiByteToWideChar(CP_UTF8, 0, startUrl.data(), static_cast<int>(startUrl.size()), trustedPage.data(), urlLength);
     WNDCLASSEXA wc = { sizeof(WNDCLASSEXA) };
     wc.lpfnWndProc   = WindowProc;
     wc.hInstance     = hInstance;
@@ -211,10 +219,12 @@ void WebViewWindow::InitWebView(const std::string& startUrl) {
 
     auto envHandler = CreateCallbackRaw<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
         [startUrl](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
+            if (shuttingDown || !s_hwnd) return S_OK;
             if (FAILED(result) || !env) return result;
 
             auto controllerHandler = CreateCallbackRaw<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
                 [startUrl](HRESULT res, ICoreWebView2Controller* controller) -> HRESULT {
+                    if (shuttingDown || !s_hwnd) { if (controller) controller->Close(); return S_OK; }
                     if (FAILED(res) || !controller) return res;
 
                     s_controller = controller;
@@ -229,6 +239,12 @@ void WebViewWindow::InitWebView(const std::string& startUrl) {
                     EventRegistrationToken token;
                     auto msgHandler = CreateCallbackRaw<ICoreWebView2WebMessageReceivedEventHandler>(
                         [](ICoreWebView2* sender, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
+                            if (shuttingDown) return S_OK;
+                            LPWSTR source = nullptr;
+                            if (FAILED(args->get_Source(&source)) || !source) return S_OK;
+                            std::wstring origin(source); CoTaskMemFree(source);
+                            origin = origin.substr(0, origin.find_first_of(L"?#"));
+                            if (origin != trustedPage) return S_OK;
                             LPWSTR jsonString = nullptr;
                             if (SUCCEEDED(args->get_WebMessageAsJson(&jsonString)) && jsonString) {
                                 std::wstring wMsg(jsonString);
@@ -247,8 +263,7 @@ void WebViewWindow::InitWebView(const std::string& startUrl) {
                     );
                     s_webview->add_WebMessageReceived(msgHandler, &token);
 
-                    std::wstring wUrl(startUrl.begin(), startUrl.end());
-                    s_webview->Navigate(wUrl.c_str());
+                    s_webview->Navigate(trustedPage.c_str());
 
                     std::cout << "[WEBVIEW] Successfully loaded: " << startUrl << std::endl;
                     return S_OK;
@@ -300,6 +315,9 @@ void WebViewWindow::RunMessageLoop() {
 
 LRESULT CALLBACK WebViewWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
+        case WM_CLOSE:
+            if (!shuttingDown && closeRequested) closeRequested();
+            return 0;
         case kDispatchWebMessage: {
             if (dispatchingWebMessage || pendingWebMessages.empty()) return 0;
             std::string message = std::move(pendingWebMessages.front());
@@ -388,7 +406,7 @@ LRESULT CALLBACK WebViewWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
             pendingWebMessages.clear();
             if (s_webview) { s_webview->Release(); s_webview = nullptr; }
             if (s_controller) { s_controller->Release(); s_controller = nullptr; }
-            PostQuitMessage(0);
+            s_hwnd = nullptr;
             break;
         default:
             return DefWindowProc(hwnd, uMsg, wParam, lParam);
@@ -397,6 +415,8 @@ LRESULT CALLBACK WebViewWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
 }
 
 void WebViewWindow::RestoreDashboard() {
+    if (shuttingDown) return;
+    if (!s_hwnd && showRequested) { showRequested(); return; }
     if (!s_hwnd || !IsWindow(s_hwnd)) return;
 
     EnableWindow(s_hwnd, TRUE);
@@ -415,7 +435,6 @@ void WebViewWindow::RestoreDashboard() {
     SetWindowPos(s_hwnd, HWND_TOP, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
 
-    AllowSetForegroundWindow(ASFW_ANY);
     SetForegroundWindow(s_hwnd);
     BringWindowToTop(s_hwnd);
     UpdateWindow(s_hwnd);
@@ -433,6 +452,18 @@ void WebViewWindow::RestoreDashboard() {
 void WebViewWindow::HideDashboard() {
     if (!s_hwnd || !IsWindow(s_hwnd)) return;
     ShowWindow(s_hwnd, SW_HIDE);
+    if (s_controller) s_controller->put_IsVisible(FALSE);
+}
+
+void WebViewWindow::SetShowRequestedCallback(std::function<void()> callback) { showRequested = std::move(callback); }
+void WebViewWindow::SetCloseRequestedCallback(std::function<void()> callback) { closeRequested = std::move(callback); }
+void WebViewWindow::Shutdown() {
+    shuttingDown = true;
+    showRequested = {}; closeRequested = {};
+    s_onMessageReceived = {};
+    pendingWebMessages.clear();
+    if (s_controller) s_controller->Close();
+    if (s_hwnd) DestroyWindow(s_hwnd);
 }
 
 void WebViewWindow::MinimizeDashboard() {

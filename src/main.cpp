@@ -23,6 +23,11 @@
 #include "../include/core/app_launcher.hpp"
 #include "../include/core/app_paths.hpp"
 #include "../include/core/legacy_data_migration.hpp"
+#include "../include/core/background_host.hpp"
+#include "../include/core/native_settings.hpp"
+#include "../include/core/single_instance.hpp"
+#include "../include/core/startup_options.hpp"
+#include <memory>
 
 using json = nlohmann::json;
 
@@ -53,6 +58,8 @@ namespace {
 std::string g_activeBiomeId;
 bool g_recordingHotkey = false;
 bool g_activationInProgress = false;
+biomes::BackgroundHost* g_background = nullptr;
+biomes::NativeSettings* g_settings = nullptr;
 
 // Per-zone sticky HWND for the currently active biome (boxId → hwnd).
 // Cleared when the biome closes. Prevents stealing sibling Chrome windows
@@ -73,9 +80,15 @@ void WriteRuntimeLog(const std::string& message) {
 }
 
 std::string BuildFileUrl(const std::filesystem::path& path) {
-    std::string raw = path.string();
+    std::string raw = path.u8string();
     std::replace(raw.begin(), raw.end(), '\\', '/');
-    return "file:///" + raw;
+    std::string escaped;
+    const char* hex = "0123456789ABCDEF";
+    for (unsigned char c : raw) {
+        if (std::isalnum(c) || c == '/' || c == ':' || c == '-' || c == '_' || c == '.' || c == '~') escaped += c;
+        else { escaped += '%'; escaped += hex[c >> 4]; escaped += hex[c & 15]; }
+    }
+    return "file:///" + escaped;
 }
 
 std::string EscapeJsonString(const std::string& input) {
@@ -614,13 +627,28 @@ void SyncHotkeysFromDisk() {
     if (g_recordingHotkey) return;
     std::vector<BiomeProfile> profiles;
     JsonManager::LoadBiomesFromFile(GetBiomesConfigPath(), profiles);
-    HotkeyManager::SyncBiomeHotkeys(WebViewWindow::GetHwnd(), profiles);
+    HotkeyManager::SyncBiomeHotkeys(g_background->Hwnd(), profiles);
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    biomes::StartupOptions options;
+    std::unique_ptr<biomes::SingleInstance> instance;
+    biomes::BackgroundHost background;
+    biomes::StartupRegistration registration;
+    biomes::NativeSettings settings(registration);
+    g_background = &background; g_settings = &settings;
     try {
+        options = biomes::StartupOptions::Parse(GetCommandLineW());
+        instance = std::make_unique<biomes::SingleInstance>();
+        if (!instance->IsPrimary()) {
+            if (!instance->ActivateExisting(options.silent))
+                MessageBoxW(nullptr,L"biomes is already running but did not respond. Try opening it from the tray.",L"biomes",MB_OK | MB_ICONINFORMATION);
+            return 0;
+        }
         biomes::AppPaths::Initialize();
         biomes::MigrateLegacyData(biomes::AppPaths::ExecutableDirectory());
+        settings.Read();
+        settings.ReconcileStartup();
     } catch (const std::exception&) {
         MessageBoxW(nullptr,
             L"biomes could not initialize or migrate local storage. Close other biomes instances and check folder permissions. Existing files have not been overwritten.",
@@ -634,9 +662,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 1;
     }
     struct ComApartmentGuard { ~ComApartmentGuard() { CoUninitialize(); } } comApartmentGuard;
+    if (!background.Initialize(hInstance, instance->WindowClass())) {
+        MessageBoxW(nullptr,L"Could not create the biomes background host.",L"biomes",MB_OK | MB_ICONERROR);
+        return 1;
+    }
 
 #ifdef _DEBUG
-    AllocConsole();
+    if (!options.silent) AllocConsole();
     freopen_s((FILE**)stdout, "CONOUT$", "w", stdout);
     freopen_s((FILE**)stderr, "CONOUT$", "w", stderr);
 #endif
@@ -663,7 +695,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         WebViewWindow::SendMessageToUI(R"({"action":"STATUS","payload":"Layout creation cancelled."})");
     });
 
-    WebViewWindow::SetHotkeyPressedCallback([](int hotkeyId) {
+    background.hotkey = [](int hotkeyId) {
         try {
         const std::string biomeId = HotkeyManager::ResolveBiomeId(hotkeyId);
         if (biomeId.empty()) return;
@@ -678,9 +710,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             WriteRuntimeLog(std::string("[APP] Hotkey activation failed: ") + error.what());
             WebViewWindow::SendMessageToUI(R"({"action":"STATUS","payload":"Biome activation failed. Check the local runtime log."})");
         }
-    });
+    };
 
     WebViewWindow::SetMessageReceivedCallback([](const std::string& message) {
+        if (g_background->Stopping()) return;
         try {
             std::cout << "[IPC RECEIVED RAW]: " << message << std::endl;
             WriteRuntimeLog("[APP] IPC raw message: " + message);
@@ -694,12 +727,24 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             const std::string action = request.value("action", "");
             WriteRuntimeLog("[APP] Action extracted: " + action);
 
-            if (action == "SET_THEME") {
+            if (action == "GET_SETTINGS" || action == "UPDATE_SETTINGS") {
+                const auto requestId = request.value("requestId", "");
+                if (requestId.size() > 128) throw std::runtime_error("Invalid request ID");
+                json response = {{"action","SETTINGS_RESULT"},{"requestId",requestId}};
+                try {
+                    response["settings"] = action == "GET_SETTINGS" ? g_settings->Read() : g_settings->Update(request.at("settings"));
+                    response["success"] = true;
+                } catch (const std::exception& e) {
+                    response["success"] = false; response["error"] = e.what();
+                }
+                WebViewWindow::SendMessageToUI(response.dump());
+            }
+            else if (action == "SET_THEME") {
                 LaunchPanel::SetTheme(request.value("theme", "light"));
             }
             else if (action == "HOTKEY_RECORDING") {
                 g_recordingHotkey = request.value("recording", false);
-                if (g_recordingHotkey) HotkeyManager::Clear(WebViewWindow::GetHwnd());
+                if (g_recordingHotkey) HotkeyManager::Clear(g_background->Hwnd());
                 else SyncHotkeysFromDisk();
             }
             else if (action == "WINDOW_CONTROL") {
@@ -819,11 +864,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                     }
                     if (!ownsShortcut) {
                         constexpr int validationId = 0xBFFE;
-                        if (!RegisterHotKey(WebViewWindow::GetHwnd(), validationId, modifiers | MOD_NOREPEAT, key)) {
+                        if (!RegisterHotKey(g_background->Hwnd(), validationId, modifiers | MOD_NOREPEAT, key)) {
                             WebViewWindow::SendMessageToUI(R"({"action":"SAVE_FAILED","payload":"Windows or another app uses this shortcut. Choose a different one."})");
                             return;
                         }
-                        UnregisterHotKey(WebViewWindow::GetHwnd(), validationId);
+                        UnregisterHotKey(g_background->Hwnd(), validationId);
                     }
                 }
                 bool replaced = false;
@@ -944,36 +989,52 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         }
     });
 
-    char buffer[MAX_PATH];
-    GetModuleFileNameA(NULL, buffer, MAX_PATH);
-    std::filesystem::path exePath(buffer);
-    std::filesystem::path htmlPath = exePath.parent_path() / "index.html";
+    std::filesystem::path htmlPath = biomes::AppPaths::ExecutableDirectory() / "index.html";
     std::string startUrl = BuildFileUrl(htmlPath);
     WriteRuntimeLog("[APP] Loading dashboard from " + startUrl);
 
-    WriteRuntimeLog("[APP] Initializing WebView2 window");
-    if (!WebViewWindow::Initialize(hInstance, nCmdShow, startUrl)) {
-        WriteRuntimeLog("[APP] WebView2 initialization failed");
-        std::cerr << "[ERROR] Failed to initialize WebView2 window." << std::endl;
-        return -1;
-    }
+    background.open = [hInstance, startUrl] {
+        if (g_background->Stopping()) return;
+        if (!WebViewWindow::GetHwnd() && !WebViewWindow::Initialize(hInstance, SW_SHOWNORMAL, startUrl))
+            throw std::runtime_error("Could not open dashboard");
+        LaunchPanel::Initialize(WebViewWindow::GetHwnd());
+        WebViewWindow::RestoreDashboard();
+    };
+    WebViewWindow::SetShowRequestedCallback(background.open);
+    WebViewWindow::SetCloseRequestedCallback([] {
+        try { g_recordingHotkey = false; SyncHotkeysFromDisk(); }
+        catch (...) { WriteRuntimeLog("[APP] Could not restore hotkeys after closing dashboard"); }
+        if (g_background->CanHide()) WebViewWindow::HideDashboard();
+        else MessageBoxW(WebViewWindow::GetHwnd(),L"The tray icon is unavailable. The dashboard will remain open so biomes stays accessible.",L"biomes",MB_OK);
+    });
+    background.startupEnabled = [&] { return registration.IsEnabled(); };
+    background.toggleStartup = [&] { settings.Update({{"launchAtStartup", !registration.IsEnabled()}}); };
 
     SyncHotkeysFromDisk();
 
-    WebViewWindow::SetDisplayChangedCallback([]() {
+    background.displayChanged = []() {
         WriteRuntimeLog("[APP] Display or work-area change detected");
         SendMonitorsChangedToUi();
-    });
+    };
     SendMonitorsChangedToUi();
 
-    LaunchPanel::Initialize(WebViewWindow::GetHwnd());
+    LaunchPanel::Initialize(background.Hwnd());
     WindowScaler::SetLaunchProgressCallback([](const std::string& progress) { LaunchPanel::Update(progress); });
-    WebViewWindow::RunMessageLoop();
-    WindowScaler::SetLaunchProgressCallback({});
-    LaunchPanel::Shutdown();
-
-    HotkeyManager::Clear(WebViewWindow::GetHwnd());
-    return 0;
+    background.shutdown = [&] {
+        GridOverlay::SetCompletedCallback({}); GridOverlay::SetCancelledCallback({});
+        WindowScaler::SetLaunchProgressCallback({});
+        WindowScaler::CancelPendingLaunches();
+        GridOverlay::HideOverlay();
+        WindowScaler::CloseBiomeSession();
+        HotkeyManager::Clear(background.Hwnd());
+        LaunchPanel::Shutdown();
+        WebViewWindow::Shutdown();
+    };
+    if (!options.silent || !background.CanHide()) {
+        try { background.open(); }
+        catch (...) { MessageBoxW(nullptr,L"Could not open dashboard. biomes remains available in the tray.",L"biomes",MB_OK | MB_ICONERROR); }
+    }
+    return background.Run();
 }
 
 std::filesystem::path GetBiomesConfigPath() {
