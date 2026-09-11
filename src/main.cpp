@@ -739,6 +739,69 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                 }
                 WebViewWindow::SendMessageToUI(response.dump());
             }
+            else if (action == "SNAPSHOT_LAYOUT" || action == "RESTORE_LAYOUT" || action == "TOGGLE_GRID_OVERLAY") {
+                json response = {{"action", action + "_RESULT"}, {"success", false}};
+                try {
+                    if (request.contains("requestId")) {
+                        const auto id = request.at("requestId").get<std::string>();
+                        if (id.size() > 128) throw std::runtime_error("Request ID is too long");
+                        response["requestId"] = id;
+                    }
+                    if (action == "SNAPSHOT_LAYOUT") {
+                        auto windows = WindowScaler::GetActiveWindows();
+                        windows.erase(std::remove_if(windows.begin(), windows.end(), [](const WindowInfo& window) {
+                            return WindowScaler::IsOurProcessWindow(window.hwnd) || IsIconic(window.hwnd);
+                        }), windows.end());
+                        const auto monitors = MonitorManager::GetConnectedMonitors();
+                        if (monitors.empty()) throw std::runtime_error("No display work areas available");
+                        const auto boxes = JsonManager::CaptureLayout(windows, monitors);
+                        response["topologyHash"] = MonitorManager::GetTopologyHash(monitors);
+                        response["boxes"] = json::array();
+                        for (const auto& box : boxes) response["boxes"].push_back(SerializeBox(box));
+                        response["success"] = true;
+                    } else if (action == "RESTORE_LAYOUT") {
+                        const auto id = request.at("id").get<std::string>();
+                        if (id.empty()) throw std::runtime_error("Missing Biome id");
+                        std::string status;
+                        // Explicit restoration re-applies a layout; it never toggles it closed.
+                        response["success"] = ActivateBiome(id, status);
+                        response["status"] = status;
+                        if (!response["success"].get<bool>()) response["error"] = status;
+                    } else {
+                        const bool enabled = request.value("enabled", !GridOverlay::IsVisible());
+                        if (!enabled) {
+                            GridOverlay::HideOverlay();
+                            WebViewWindow::RestoreDashboard();
+                        } else if (!GridOverlay::IsVisible()) {
+                            std::vector<SelectedBox> boxes;
+                            if (request.contains("id")) {
+                                const auto id = request.at("id").get<std::string>();
+                                std::vector<BiomeProfile> profiles;
+                                if (!JsonManager::LoadBiomesFromFile(GetBiomesConfigPath(), profiles))
+                                    throw std::runtime_error("Could not read saved Biomes");
+                                const auto found = std::find_if(profiles.begin(), profiles.end(),
+                                    [&](const BiomeProfile& profile) { return profile.id == id; });
+                                if (found == profiles.end()) throw std::runtime_error("Unknown Biome id");
+                                boxes = JsonManager::SelectLayoutForTopology(*found);
+                            }
+                            const int rows = request.value("rows", 8);
+                            const int columns = request.value("columns", 14);
+                            if (!GridOverlay::ShowOverlayWithLayout(boxes, rows, columns))
+                                throw std::runtime_error("Could not open grid overlay");
+                            if (request.contains("id") && !GridOverlay::StartSnapping()) {
+                                GridOverlay::HideOverlay();
+                                throw std::runtime_error("No saved zones on connected monitors");
+                            }
+                            WebViewWindow::HideDashboard();
+                        }
+                        response["visible"] = GridOverlay::IsVisible();
+                        response["success"] = true;
+                    }
+                } catch (const std::exception& error) {
+                    response["error"] = error.what();
+                }
+                WebViewWindow::SendMessageToUI(response.dump());
+            }
             else if (action == "SET_THEME") {
                 LaunchPanel::SetTheme(request.value("theme", "light"));
             }
@@ -1014,6 +1077,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     background.displayChanged = []() {
         WriteRuntimeLog("[APP] Display or work-area change detected");
+        if (GridOverlay::IsVisible()) {
+            GridOverlay::HideOverlay();
+            WebViewWindow::RestoreDashboard();
+            WebViewWindow::SendMessageToUI(R"({"action":"STATUS","payload":"Displays changed. Reopen the grid overlay to use the current work areas."})");
+        }
         SendMonitorsChangedToUi();
     };
     SendMonitorsChangedToUi();

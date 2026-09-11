@@ -753,16 +753,21 @@ bool WindowScaler::IsManagedAppWindow(HWND hwnd) {
     if (!hwnd || !IsWindow(hwnd) || !IsWindowVisible(hwnd)) return false;
     if (GetWindow(hwnd, GW_OWNER) != nullptr) return false;
 
-    const LONG exStyle = GetWindowLongA(hwnd, GWL_EXSTYLE);
-    if (exStyle & WS_EX_TOOLWINDOW) return false;
-    if ((exStyle & WS_EX_APPWINDOW) == 0 && GetWindowTextLengthA(hwnd) == 0) return false;
+    const LONG_PTR exStyle = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    if (exStyle & (WS_EX_TOOLWINDOW | WS_EX_LAYERED)) return false;
+    if (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_CHILD) return false;
+    if (hwnd == GetShellWindow() || hwnd == GetDesktopWindow()) return false;
+    wchar_t className[128]{};
+    GetClassNameW(hwnd, className, 128);
+    for (const auto* shellClass : {L"Shell_TrayWnd", L"Shell_SecondaryTrayWnd", L"Progman", L"WorkerW"})
+        if (wcscmp(className, shellClass) == 0) return false;
 
     BOOL cloaked = FALSE;
     if (SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked) {
         return false;
     }
 
-    if (GetWindowTextLengthA(hwnd) <= 0) return false;
+    if (GetWindowTextLengthW(hwnd) <= 0) return false;
     return true;
 }
 
@@ -895,22 +900,44 @@ void WindowScaler::CacheBiomeAppPreState(HWND hwnd, bool launchedFresh) {
 
 namespace {
 bool CalculateTargetRect(const SelectedBox& box, RECT& outTarget) {
-    if (!std::isfinite(box.relX) || !std::isfinite(box.relY) ||
-        !std::isfinite(box.relWidth) || !std::isfinite(box.relHeight) ||
-        box.relX < 0 || box.relY < 0 || box.relWidth <= 0 || box.relHeight <= 0 ||
-        box.relX + box.relWidth > 1.0001f || box.relY + box.relHeight > 1.0001f) return false;
     RECT work{};
     if (!MonitorManager::GetWorkAreaForBox(box.monitorIndex, box.monitorDevice, box.stableMonitorId, work))
         return false;
-    const LONG width = work.right - work.left, height = work.bottom - work.top;
-    if (width <= 0 || height <= 0) return false;
-    outTarget.left = work.left + static_cast<LONG>(box.relX * width);
-    outTarget.top = work.top + static_cast<LONG>(box.relY * height);
-    outTarget.right = work.left + static_cast<LONG>(std::min(1.0f, box.relX + box.relWidth) * width);
-    outTarget.bottom = work.top + static_cast<LONG>(std::min(1.0f, box.relY + box.relHeight) * height);
-    return outTarget.right > outTarget.left && outTarget.bottom > outTarget.top;
+    return WindowScaler::CalculateRelativeRect(work, box.relX, box.relY,
+                                               box.relWidth, box.relHeight, outTarget);
 }
 }
+
+bool WindowScaler::CalculateRelativeRect(const RECT& work, double x, double y,
+                                        double width, double height, RECT& target) {
+    if (!isfinite(x) || !isfinite(y) || !isfinite(width) || !isfinite(height) ||
+        x < 0 || y < 0 || x >= 1 || y >= 1 || width <= 0 || height <= 0 ||
+        x + width > 1.0001 || y + height > 1.0001 ||
+        work.right <= work.left || work.bottom <= work.top) return false;
+    const double workWidth = static_cast<double>(work.right) - work.left;
+    const double workHeight = static_cast<double>(work.bottom) - work.top;
+    // Round shared edges, rather than widths, so adjacent thirds have no gaps.
+    RECT result{
+        static_cast<LONG>(work.left + round(x * workWidth)),
+        static_cast<LONG>(work.top + round(y * workHeight)),
+        static_cast<LONG>(work.left + round(min(1.0, x + width) * workWidth)),
+        static_cast<LONG>(work.top + round(min(1.0, y + height) * workHeight))};
+    if (result.right <= result.left || result.bottom <= result.top) return false;
+    target = result;
+    return true;
+}
+
+bool WindowScaler::CalculateGridRect(const RECT& work, int rows, int columns,
+                                    int startRow, int endRow, int startColumn,
+                                    int endColumn, RECT& target) {
+    if (rows <= 0 || columns <= 0 || startRow < 0 || startColumn < 0 ||
+        endRow <= startRow || endColumn <= startColumn ||
+        endRow > rows || endColumn > columns) return false;
+    return CalculateRelativeRect(work, static_cast<double>(startColumn) / columns,
+        static_cast<double>(startRow) / rows, static_cast<double>(endColumn - startColumn) / columns,
+        static_cast<double>(endRow - startRow) / rows, target);
+}
+
 bool WindowScaler::ComputeTargetRect(const SelectedBox& box, RECT& outTarget) {
     return CalculateTargetRect(box, outTarget);
 }

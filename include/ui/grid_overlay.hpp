@@ -53,6 +53,8 @@ public:
                                       int rows = 8, int cols = 14,
                                       const OverlayTheme& theme = OverlayTheme());
     static void HideOverlay();
+    static bool IsVisible();
+    static bool StartSnapping();
     static void SetCompletedCallback(std::function<void(const std::vector<SelectedBox>&)> cb);
     static void SetCancelledCallback(std::function<void()> cb);
 
@@ -71,6 +73,7 @@ private:
     static POINT s_dragStart, s_dragCurrent;
     static HWND s_activeDragHwnd, s_movingWindowHwnd;
     static HWINEVENTHOOK s_hWinEventHook;
+    static HWINEVENTHOOK s_locationHook;
     static std::vector<SelectedBox> s_savedBoxes;
     static int s_hoveredBoxId; // -1 when none; updated while dragging in snap mode
     static std::function<void(const std::vector<SelectedBox>&)> s_onCompleted;

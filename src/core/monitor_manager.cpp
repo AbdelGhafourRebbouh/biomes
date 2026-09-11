@@ -17,7 +17,12 @@ string EscapeJson(const string& input) {
         switch (c) {
             case '\\': ss << "\\\\"; break;
             case '"':  ss << "\\\""; break;
-            default:   ss << c; break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20)
+                    ss << "\\u00" << hex << setfill('0') << setw(2)
+                       << static_cast<unsigned>(static_cast<unsigned char>(c)) << dec;
+                else ss << c;
+                break;
         }
     }
     return ss.str();
@@ -42,8 +47,9 @@ string WideToUtf8(const wchar_t* wide) {
     if (!wide || !wide[0]) return {};
     const int needed = WideCharToMultiByte(CP_UTF8, 0, wide, -1, nullptr, 0, nullptr, nullptr);
     if (needed <= 0) return {};
-    string out(static_cast<size_t>(needed - 1), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, wide, -1, out.data(), needed, nullptr, nullptr);
+    string out(static_cast<size_t>(needed), '\0');
+    if (!WideCharToMultiByte(CP_UTF8, 0, wide, -1, out.data(), needed, nullptr, nullptr)) return {};
+    out.pop_back();
     return out;
 }
 
@@ -76,6 +82,8 @@ map<HMONITOR, EdidTargetInfo> QueryEdidTargetsByMonitor() {
         nullptr);
 
     if (status == ERROR_INSUFFICIENT_BUFFER) {
+        if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &pathCount, &modeCount) != ERROR_SUCCESS)
+            return result;
         paths.resize(pathCount);
         modes.resize(modeCount);
         status = QueryDisplayConfig(
@@ -152,19 +160,26 @@ void DisambiguateDuplicateStableIds(vector<MonitorDetail>& monitors) {
 BOOL CALLBACK MonitorEnumCallback(HMONITOR hMonitor, HDC, LPRECT, LPARAM dwData) {
     auto* monitors = reinterpret_cast<vector<MonitorDetail>*>(dwData);
 
-    MONITORINFOEXA mi{};
-    mi.cbSize = sizeof(MONITORINFOEXA);
-    if (!GetMonitorInfoA(hMonitor, &mi)) return TRUE;
+    MONITORINFOEXW mi{};
+    mi.cbSize = sizeof(mi);
+    if (!GetMonitorInfoW(hMonitor, &mi)) return TRUE;
 
     MonitorDetail detail;
     detail.index = static_cast<int>(monitors->size());
-    detail.deviceName = mi.szDevice;
+    detail.deviceName = WideToUtf8(mi.szDevice);
     detail.hMonitor = hMonitor;
     detail.rcWork = mi.rcWork;
     detail.rcMonitor = mi.rcMonitor;
     detail.width = mi.rcWork.right - mi.rcWork.left;
     detail.height = mi.rcWork.bottom - mi.rcWork.top;
     detail.isPrimary = (mi.dwFlags & MONITORINFOF_PRIMARY) != 0;
+    UINT dpiX = 96, dpiY = 96;
+    if (SUCCEEDED(GetDpiForMonitor(hMonitor, MDT_EFFECTIVE_DPI, &dpiX, &dpiY)) && dpiX && dpiY) {
+        detail.dpiX = dpiX;
+        detail.dpiY = dpiY;
+        detail.scaleX = dpiX / 96.0;
+        detail.scaleY = dpiY / 96.0;
+    }
 
     monitors->push_back(detail);
     return TRUE;
@@ -180,19 +195,16 @@ int FindPrimaryIndex(const vector<MonitorDetail>& monitors) {
 } // namespace
 
 string MonitorManager::BuildStableMonitorId(HMONITOR hMonitor, const string& deviceName) {
-    const auto edidMap = QueryEdidTargetsByMonitor();
-    const auto it = edidMap.find(hMonitor);
-    if (it != edidMap.end() && it->second.valid) {
-        return it->second.stableId;
+    // Use the same duplicate disambiguation as enumeration and persistence.
+    for (const auto& monitor : GetConnectedMonitors()) {
+        if (monitor.hMonitor == hMonitor && monitor.deviceName == deviceName)
+            return monitor.stableId;
     }
     return "GDI:" + deviceName;
 }
 
 string MonitorManager::BuildWorkAreaSignature(const MonitorDetail& monitor) {
-    UINT dpiX = 96;
-    UINT dpiY = 96;
-    GetDpiForMonitor(monitor.hMonitor, MDT_EFFECTIVE_DPI, &dpiX, &dpiY);
-    const int scalePct = static_cast<int>((dpiX * 100 + 48) / 96);
+    const int scalePct = static_cast<int>((monitor.dpiX * 100 + 48) / 96);
     ostringstream ss;
     ss << monitor.width << "x" << monitor.height << "@" << scalePct;
     return ss.str();
@@ -200,7 +212,8 @@ string MonitorManager::BuildWorkAreaSignature(const MonitorDetail& monitor) {
 
 vector<MonitorDetail> MonitorManager::GetConnectedMonitors() {
     vector<MonitorDetail> monitors;
-    EnumDisplayMonitors(nullptr, nullptr, MonitorEnumCallback, reinterpret_cast<LPARAM>(&monitors));
+    if (!EnumDisplayMonitors(nullptr, nullptr, MonitorEnumCallback, reinterpret_cast<LPARAM>(&monitors)))
+        return {};
 
     const auto edidMap = QueryEdidTargetsByMonitor();
     for (auto& mon : monitors) {
@@ -285,7 +298,10 @@ bool MonitorManager::GetWorkAreaForBox(int monitorIndex,
 }
 
 string MonitorManager::GetCurrentTopologyHash() {
-    auto monitors = GetConnectedMonitors();
+    return GetTopologyHash(GetConnectedMonitors());
+}
+
+string MonitorManager::GetTopologyHash(const vector<MonitorDetail>& monitors) {
     vector<string> ids;
     ids.reserve(monitors.size());
     for (const auto& mon : monitors) {
@@ -306,7 +322,7 @@ string MonitorManager::GetCurrentTopologyHash() {
 
 string MonitorManager::SerializeMonitorsJson() {
     const auto monitors = GetConnectedMonitors();
-    const string topologyHash = GetCurrentTopologyHash();
+    const string topologyHash = GetTopologyHash(monitors);
 
     ostringstream ss;
     ss << "{\"topologyHash\":\"" << topologyHash << "\",\"monitors\":[";
@@ -320,6 +336,12 @@ string MonitorManager::SerializeMonitorsJson() {
            << "\"isPrimary\":" << (mon.isPrimary ? "true" : "false") << ","
            << "\"workW\":" << mon.width << ","
            << "\"workH\":" << mon.height << ","
+           << "\"workX\":" << mon.rcWork.left << ","
+           << "\"workY\":" << mon.rcWork.top << ","
+           << "\"dpiX\":" << mon.dpiX << ","
+           << "\"dpiY\":" << mon.dpiY << ","
+           << "\"scaleX\":" << mon.scaleX << ","
+           << "\"scaleY\":" << mon.scaleY << ","
            << "\"signature\":\"" << EscapeJson(mon.workAreaSignature) << "\""
            << "}";
     }
@@ -349,13 +371,13 @@ MonitorManager::BiomeMonitorHealth MonitorManager::EvaluateBiomeMonitorHealth(
         health.requiredMonitors = 1;
     }
 
-    const string currentHash = GetCurrentTopologyHash();
+    const string currentHash = GetTopologyHash(monitors);
     if (!savedTopologyHash.empty() && savedTopologyHash != currentHash) {
         health.topologyMatch = false;
     }
 
     for (const auto& zone : zones) {
-        const MonitorResolveResult resolved = ResolveMonitorForBox(zone);
+        const MonitorResolveResult resolved = ResolveMonitorForBox(zone, monitors);
         if (resolved.resolvedIndex < 0) {
             ++health.missingZones;
         } else {

@@ -141,6 +141,35 @@ int main() {
         Require(!CalculateTargetRect(Zone(), target), "disconnected monitor skipped");
         Reset();
 
+        // Odd work-area dimensions must tile without gaps at shared edges.
+        const RECT oddWork{-1921, -100, 0, 981};
+        LONG previousRight = oddWork.left;
+        for (int column = 0; column < 3; ++column) {
+            RECT third{};
+            Require(WindowScaler::CalculateGridRect(oddWork, 1, 3, 0, 1, column, column + 1, third), "third accepted");
+            Require(third.left == previousRight && third.top == oddWork.top && third.bottom == oddWork.bottom,
+                    "thirds share edges and respect work area");
+            previousRight = third.right;
+        }
+        Require(previousRight == oddWork.right, "thirds fill work area");
+        RECT gridTarget{};
+        Require(WindowScaler::CalculateGridRect(oddWork, 2, 2, 1, 2, 1, 2, gridTarget), "quadrant accepted");
+        Require(gridTarget.right == oddWork.right && gridTarget.bottom == oddWork.bottom, "quadrant bounded");
+        Require(!WindowScaler::CalculateGridRect(oddWork, 0, 2, 0, 1, 0, 1, gridTarget), "zero grid rejected");
+        Require(!WindowScaler::CalculateGridRect(oddWork, 2, 2, 0, 3, 0, 1, gridTarget), "invalid grid edge rejected");
+        Require(!WindowScaler::CalculateRelativeRect(oddWork, 1, 0, .00001, 1, gridTarget), "start beyond work area rejected");
+        HWND filtered = Window(L"Unicode fixture \u00e9", true);
+        Require(WindowScaler::IsMainApplicationWindow(filtered), "ordinary window included");
+        const LONG_PTR originalStyle = GetWindowLongPtrW(filtered, GWL_EXSTYLE);
+        SetWindowLongPtrW(filtered, GWL_EXSTYLE, originalStyle | WS_EX_LAYERED);
+        Require(!WindowScaler::IsManagedAppWindow(filtered), "layered window excluded");
+        SetWindowLongPtrW(filtered, GWL_EXSTYLE, originalStyle | WS_EX_TOOLWINDOW);
+        Require(!WindowScaler::IsManagedAppWindow(filtered), "tool window excluded");
+        SetWindowLongPtrW(filtered, GWL_EXSTYLE, originalStyle);
+        ShowWindow(filtered, SW_HIDE);
+        Require(!WindowScaler::IsManagedAppWindow(filtered), "hidden window excluded");
+        Reset();
+
         for (int count : {1, 8, 24}) {
             for (int repetition = 0; repetition < 4; ++repetition) {
                 for (int i = 0; i < count; ++i) Require(WindowScaler::ForceSnapToBox(Window(), Zone()), "placement accepted");

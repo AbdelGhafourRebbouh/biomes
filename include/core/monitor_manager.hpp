@@ -16,6 +16,10 @@ struct MonitorDetail {
     int width = 0;
     int height = 0;
     bool isPrimary = false;
+    UINT dpiX = 96;
+    UINT dpiY = 96;
+    double scaleX = 1.0;
+    double scaleY = 1.0;
 };
 
 enum class MonitorMatchKind {
@@ -87,9 +91,11 @@ public:
 
     static std::string BuildStableMonitorId(HMONITOR hMonitor, const std::string& deviceName);
     static std::string GetCurrentTopologyHash();
+    // Reuse a single enumeration when reporting topology and monitor geometry.
+    static std::string GetTopologyHash(const std::vector<MonitorDetail>& monitors);
     static std::string BuildWorkAreaSignature(const MonitorDetail& monitor);
 
-    // JSON: {topologyHash, monitors:[{stableId,deviceName,isPrimary,workW,workH,friendlyName,signature}]}
+    // JSON includes identity, work-area origin/size, DPI, scale, and diagnostics.
     static std::string SerializeMonitorsJson();
 
     struct BiomeMonitorHealth {

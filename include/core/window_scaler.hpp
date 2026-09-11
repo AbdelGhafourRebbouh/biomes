@@ -51,6 +51,15 @@ class WindowScaler {
 public:
     static std::vector<WindowInfo> GetActiveWindows();
 
+    // Pure screen-pixel geometry. The application runs per-monitor DPI aware;
+    // rcWork already contains physical coordinates and must not be scaled twice.
+    static bool CalculateRelativeRect(const RECT& work, double x, double y,
+                                     double width, double height, RECT& target);
+    // Half-open grid edges: halves = 2 columns, thirds = 3, quadrants = 2 x 2.
+    static bool CalculateGridRect(const RECT& work, int rows, int columns,
+                                  int startRow, int endRow, int startColumn,
+                                  int endColumn, RECT& target);
+
     // Resolves a UWP host wrapper to its actual package identity while retaining
     // the outer HWND for placement. Returns false for an unresolved host wrapper.
     static bool ResolveWindowIdentity(HWND hwnd, WindowIdentity& outIdentity);

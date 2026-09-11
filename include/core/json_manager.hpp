@@ -16,8 +16,16 @@ struct BiomeProfile {
     std::unordered_map<std::string, std::vector<SelectedBox>> layoutVariants; // Per-topology layouts
 };
 
+struct WindowInfo;
+struct MonitorDetail;
+
 class JsonManager {
 public:
+    // Captures visible geometry from one display snapshot; cross-monitor windows
+    // use their largest work-area intersection. Callers omit minimized/own windows.
+    static std::vector<SelectedBox> CaptureLayout(const std::vector<WindowInfo>& windows,
+                                                 const std::vector<MonitorDetail>& monitors);
+
     // Collection API used by the dashboard. A single file contains every saved Biome.
     static bool SaveBiomesToFile(const std::filesystem::path& filePath, const std::vector<BiomeProfile>& profiles);
     static bool LoadBiomesFromFile(const std::filesystem::path& filePath, std::vector<BiomeProfile>& outProfiles);

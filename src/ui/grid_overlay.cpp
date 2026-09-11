@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <psapi.h>
+#include <windowsx.h>
 
 // ---------------------------------------------------------------------------
 // GridOverlay — one top-level popup per monitor, sized to rcWork (matches snap).
@@ -29,6 +30,7 @@ bool GridOverlay::s_isDragging = false;
 POINT GridOverlay::s_dragStart = {0, 0}, GridOverlay::s_dragCurrent = {0, 0};
 HWND GridOverlay::s_activeDragHwnd = nullptr, GridOverlay::s_movingWindowHwnd = nullptr;
 HWINEVENTHOOK GridOverlay::s_hWinEventHook = nullptr;
+HWINEVENTHOOK GridOverlay::s_locationHook = nullptr;
 std::vector<SelectedBox> GridOverlay::s_savedBoxes;
 int GridOverlay::s_hoveredBoxId = -1;
 std::function<void(const std::vector<SelectedBox>&)> GridOverlay::s_onCompleted;
@@ -67,6 +69,7 @@ void BindWindowToBox(SelectedBox& box, HWND hwnd, const MonitorInfoData& monitor
     box.assignedApp = !identity.processPath.empty() ? identity.processPath : identity.aumid;
     box.exeName = identity.processName;
     box.aumid = identity.aumid;
+    box.launchUri.clear();
     if (box.aumid.empty() && AppLauncher::IsPackagedAppPath(box.assignedApp)) {
         box.aumid = AppLauncher::ResolveAumidForBox(box);
     }
@@ -122,6 +125,7 @@ SelectedBox* GridOverlay::HitTestBoxAtCursor(POINT screenPt) {
 
 void CALLBACK GridOverlay::WinEventProc(HWINEVENTHOOK, DWORD e, HWND hwnd, LONG obj, LONG child, DWORD, DWORD) {
     if (!s_isSnappingMode || obj != OBJID_WINDOW || child != CHILDID_SELF) return;
+    if (WindowScaler::IsOurProcessWindow(hwnd) || !WindowScaler::IsMainApplicationWindow(ResolveRootWindow(hwnd))) return;
 
     if (e == EVENT_SYSTEM_MOVESIZESTART) {
         s_movingWindowHwnd = ResolveRootWindow(hwnd);
@@ -149,14 +153,12 @@ void CALLBACK GridOverlay::WinEventProc(HWINEVENTHOOK, DWORD e, HWND hwnd, LONG 
         GetCursorPos(&pt);
         if (SelectedBox* hit = HitTestBoxAtCursor(pt)) {
             const auto& monitor = s_monitors[hit->monitorIndex];
-            RECT screenBox = hit->pixelRect;
-            MapWindowPoints(monitor.hwndOverlay, nullptr, reinterpret_cast<POINT*>(&screenBox), 2);
-            SetWindowPos(root, HWND_TOP,
-                         screenBox.left, screenBox.top,
-                         screenBox.right - screenBox.left,
-                         screenBox.bottom - screenBox.top,
-                         SWP_SHOWWINDOW);
-            BindWindowToBox(*hit, root, monitor);
+            // Capture original WINDOWPLACEMENT through the shared snapping engine.
+            SelectedBox bound = *hit;
+            BindWindowToBox(bound, root, monitor);
+            WindowScaler::CacheBiomeAppPreState(root, false);
+            if (!WindowScaler::ForceSnapToBox(root, bound)) return;
+            for (auto& box : s_savedBoxes) if (box.id == bound.id) { box = bound; break; }
         }
 
         s_movingWindowHwnd = nullptr;
@@ -171,6 +173,7 @@ bool GridOverlay::ShowOverlay(int r, int c, const OverlayTheme& t) {
 
 bool GridOverlay::ShowOverlayWithLayout(const std::vector<SelectedBox>& existingBoxes,
                                         int r, int c, const OverlayTheme& t) {
+    if (r < 1 || c < 1 || r > 128 || c > 128) return false;
     HideOverlay();
 
     s_rows = r;
@@ -207,22 +210,21 @@ bool GridOverlay::ShowOverlayWithLayout(const std::vector<SelectedBox>& existing
                   << info.rect.right << "," << info.rect.bottom << std::endl;
     }
 
-    const std::string topologyHash = MonitorManager::GetCurrentTopologyHash();
-    if (!existingBoxes.empty()) {
-        s_savedBoxes = JsonManager::RemapLayoutToCurrentMonitors(existingBoxes);
-        for (auto& box : s_savedBoxes) {
-            box.topologyHash = topologyHash;
-            if (box.monitorIndex >= 0 && box.monitorIndex < static_cast<int>(s_monitors.size())) {
-                const int w = s_monitors[box.monitorIndex].rect.right - s_monitors[box.monitorIndex].rect.left;
-                const int h = s_monitors[box.monitorIndex].rect.bottom - s_monitors[box.monitorIndex].rect.top;
-                box.pixelRect = {
-                    static_cast<LONG>(box.relX * w),
-                    static_cast<LONG>(box.relY * h),
-                    static_cast<LONG>((box.relX + box.relWidth) * w),
-                    static_cast<LONG>((box.relY + box.relHeight) * h)
-                };
-            }
-        }
+    const std::string topologyHash = MonitorManager::GetTopologyHash(connected);
+    for (auto box : existingBoxes) {
+        const auto resolved = MonitorManager::ResolveMonitorForBox(
+            {box.stableMonitorId, box.monitorDevice, box.monitorIndex}, connected);
+        if (resolved.resolvedIndex < 0) continue;
+        const auto& monitor = connected[resolved.resolvedIndex];
+        RECT local{0, 0, monitor.width, monitor.height};
+        if (!WindowScaler::CalculateRelativeRect(local, box.relX, box.relY,
+                                                 box.relWidth, box.relHeight, box.pixelRect)) continue;
+        box.monitorIndex = monitor.index;
+        box.monitorDevice = monitor.deviceName;
+        box.stableMonitorId = monitor.stableId;
+        box.topologyHash = topologyHash;
+        box.id = static_cast<int>(s_savedBoxes.size()) + 1;
+        s_savedBoxes.push_back(std::move(box));
     }
 
     HINSTANCE hInst = GetModuleHandle(nullptr);
@@ -241,12 +243,16 @@ bool GridOverlay::ShowOverlayWithLayout(const std::vector<SelectedBox>& existing
         nullptr, WinEventProc, 0, 0,
         WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
 
+    s_locationHook = SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE,
+        nullptr, WinEventProc, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    if (!s_hWinEventHook || !s_locationHook) { HideOverlay(); return false; }
+
     for (auto& m : s_monitors) {
         const int width = m.rect.right - m.rect.left;
         const int height = m.rect.bottom - m.rect.top;
 
         m.hwndOverlay = CreateWindowExA(
-            WS_EX_TOPMOST | WS_EX_LAYERED,
+            WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW,
             kOverlayClass,
             "Biomes Fullscreen Overlay",
             WS_POPUP,
@@ -261,12 +267,17 @@ bool GridOverlay::ShowOverlayWithLayout(const std::vector<SelectedBox>& existing
 
         if (!m.hwndOverlay) {
             std::cerr << "[OVERLAY] CreateWindowEx failed (" << GetLastError() << ")" << std::endl;
-            continue;
+            HideOverlay();
+            return false;
         }
 
         SetWindowLongPtr(m.hwndOverlay, GWLP_USERDATA, static_cast<LONG_PTR>(m.index));
         SetLayeredWindowAttributes(m.hwndOverlay, 0, s_theme.bgAlpha, LWA_ALPHA);
-        RegisterHotKey(m.hwndOverlay, HOTKEY_ID, MOD_NOREPEAT, VK_RETURN);
+        if (m.index == 0 && (!RegisterHotKey(m.hwndOverlay, HOTKEY_ID, MOD_NOREPEAT, VK_RETURN) ||
+                            !RegisterHotKey(m.hwndOverlay, HOTKEY_ID + 1, MOD_NOREPEAT, VK_ESCAPE))) {
+            HideOverlay();
+            return false;
+        }
 
         SetWindowPos(
             m.hwndOverlay,
@@ -290,6 +301,7 @@ bool GridOverlay::ShowOverlayWithLayout(const std::vector<SelectedBox>& existing
 }
 
 void GridOverlay::HideOverlay() {
+    if (s_locationHook) { UnhookWinEvent(s_locationHook); s_locationHook = nullptr; }
     if (s_hWinEventHook) {
         UnhookWinEvent(s_hWinEventHook);
         s_hWinEventHook = nullptr;
@@ -297,15 +309,36 @@ void GridOverlay::HideOverlay() {
     for (auto& m : s_monitors) {
         if (m.hwndOverlay) {
             UnregisterHotKey(m.hwndOverlay, HOTKEY_ID);
+            UnregisterHotKey(m.hwndOverlay, HOTKEY_ID + 1);
             DestroyWindow(m.hwndOverlay);
             m.hwndOverlay = nullptr;
         }
     }
     s_monitors.clear();
+    s_savedBoxes.clear();
     s_hoveredBoxId = -1;
     s_movingWindowHwnd = nullptr;
     s_isSnappingMode = false;
     s_isDragging = false;
+}
+
+bool GridOverlay::IsVisible() {
+    return !s_monitors.empty() && s_monitors.front().hwndOverlay != nullptr;
+}
+
+bool GridOverlay::StartSnapping() {
+    if (!IsVisible() || s_savedBoxes.empty()) return false;
+    s_isSnappingMode = true;
+    s_hoveredBoxId = -1;
+    for (auto& monitor : s_monitors) {
+        const auto hwnd = monitor.hwndOverlay;
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE,
+            GetWindowLongPtrW(hwnd, GWL_EXSTYLE) | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE);
+        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    }
+    InvalidateAllOverlays();
+    return true;
 }
 
 void GridOverlay::SetCompletedCallback(std::function<void(const std::vector<SelectedBox>&)> cb) {
@@ -437,7 +470,7 @@ LRESULT CALLBACK GridOverlay::WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
         case WM_LBUTTONDOWN:
             if (!s_isSnappingMode) {
                 s_isDragging = true;
-                s_dragStart = { LOWORD(lp), HIWORD(lp) };
+                s_dragStart = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
                 s_dragCurrent = s_dragStart;
                 SetCapture(hwnd);
             }
@@ -445,7 +478,7 @@ LRESULT CALLBACK GridOverlay::WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
 
         case WM_MOUSEMOVE:
             if (s_isDragging) {
-                s_dragCurrent = { LOWORD(lp), HIWORD(lp) };
+                s_dragCurrent = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
             return 0;
@@ -456,6 +489,11 @@ LRESULT CALLBACK GridOverlay::WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
                 ReleaseCapture();
                 RECT r{};
                 GetClientRect(hwnd, &r);
+                if (r.right <= 0 || r.bottom <= 0) return 0;
+                s_dragStart.x = std::clamp(s_dragStart.x, 0L, r.right - 1);
+                s_dragStart.y = std::clamp(s_dragStart.y, 0L, r.bottom - 1);
+                s_dragCurrent.x = std::clamp(s_dragCurrent.x, 0L, r.right - 1);
+                s_dragCurrent.y = std::clamp(s_dragCurrent.y, 0L, r.bottom - 1);
                 const float cw = static_cast<float>(r.right) / s_cols;
                 const float ch = static_cast<float>(r.bottom) / s_rows;
                 const int sc = static_cast<int>(std::min(s_dragStart.x, s_dragCurrent.x) / cw);
@@ -466,10 +504,7 @@ LRESULT CALLBACK GridOverlay::WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
                 SelectedBox b;
                 b.id = static_cast<int>(s_savedBoxes.size()) + 1;
                 b.monitorIndex = mIdx;
-                b.pixelRect = {
-                    static_cast<LONG>(sc * cw), static_cast<LONG>(sr * ch),
-                    static_cast<LONG>(ec * cw), static_cast<LONG>(er * ch)
-                };
+                if (!WindowScaler::CalculateGridRect(r, s_rows, s_cols, sr, er, sc, ec, b.pixelRect)) return 0;
                 b.relX = static_cast<float>(b.pixelRect.left) / r.right;
                 b.relY = static_cast<float>(b.pixelRect.top) / r.bottom;
                 b.relWidth = static_cast<float>(b.pixelRect.right - b.pixelRect.left) / r.right;
@@ -500,6 +535,11 @@ LRESULT CALLBACK GridOverlay::WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
             return 0;
 
         case WM_HOTKEY:
+            if (wp == HOTKEY_ID + 1) {
+                HideOverlay();
+                if (s_onCancelled) s_onCancelled();
+                return 0;
+            }
             if (wp != HOTKEY_ID) return 0;
 
             if (!s_isSnappingMode) {
@@ -508,20 +548,7 @@ LRESULT CALLBACK GridOverlay::WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
                     // Require at least one zone before continuing.
                     return 0;
                 }
-                s_isSnappingMode = true;
-                s_hoveredBoxId = -1;
-                for (auto& m : s_monitors) {
-                    if (!m.hwndOverlay) continue;
-                    const LONG_PTR style = GetWindowLongPtr(m.hwndOverlay, GWL_EXSTYLE);
-                    SetWindowLongPtr(m.hwndOverlay, GWL_EXSTYLE,
-                                     style | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE);
-                    SetWindowPos(m.hwndOverlay, HWND_TOPMOST,
-                                 m.rect.left, m.rect.top,
-                                 m.rect.right - m.rect.left, m.rect.bottom - m.rect.top,
-                                 SWP_SHOWWINDOW | SWP_NOACTIVATE | SWP_FRAMECHANGED);
-                    InvalidateRect(m.hwndOverlay, nullptr, TRUE);
-                }
-                std::cout << "[OVERLAY] Enter → snap mode (" << s_savedBoxes.size() << " zones)" << std::endl;
+                StartSnapping();
                 return 0;
             }
 
