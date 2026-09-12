@@ -10,6 +10,7 @@ add_executable(Biomes WIN32
     resources/biomes.rc
     src/main.cpp
     src/core/hotkey_manager.cpp
+    src/core/ipc_bridge.cpp
     src/core/json_manager.cpp
     src/core/app_paths.cpp
     src/core/legacy_data_migration.cpp
@@ -45,6 +46,15 @@ endif()
 option(BIOMES_BUILD_TESTS "Build isolated native stability regression tests" OFF)
 if(BIOMES_BUILD_TESTS)
     enable_testing()
+    add_executable(BiomesIpcTests src/core/ipc_bridge_tests.cpp src/core/ipc_bridge.cpp)
+    target_include_directories(BiomesIpcTests PRIVATE include)
+    add_test(NAME ipc_regressions COMMAND BiomesIpcTests)
+    add_executable(BiomesWebViewTests src/ui/webview_window_tests.cpp src/core/app_paths.cpp)
+    target_compile_definitions(BiomesWebViewTests PRIVATE BIOMES_STORAGE_TESTING)
+    target_include_directories(BiomesWebViewTests PRIVATE include include/external/webview2)
+    target_link_libraries(BiomesWebViewTests PRIVATE user32 gdi32 dwmapi ole32 shell32)
+    add_test(NAME webview_regressions COMMAND BiomesWebViewTests)
+    set_tests_properties(webview_regressions PROPERTIES TIMEOUT 45)
     add_executable(BiomesLayoutTests tests/layout_tests.cpp src/core/json_manager.cpp
         src/core/monitor_manager.cpp src/core/window_scaler.cpp src/core/app_launcher.cpp
         src/core/app_paths.cpp src/ui/grid_overlay.cpp)

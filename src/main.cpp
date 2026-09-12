@@ -25,6 +25,7 @@
 #include "../include/core/legacy_data_migration.hpp"
 #include "../include/core/background_host.hpp"
 #include "../include/core/native_settings.hpp"
+#include "../include/core/ipc_bridge.hpp"
 #include "../include/core/single_instance.hpp"
 #include "../include/core/startup_options.hpp"
 #include <memory>
@@ -60,6 +61,7 @@ bool g_recordingHotkey = false;
 bool g_activationInProgress = false;
 biomes::BackgroundHost* g_background = nullptr;
 biomes::NativeSettings* g_settings = nullptr;
+std::unique_ptr<biomes::IpcBridge> g_ipc;
 
 // Per-zone sticky HWND for the currently active biome (boxId → hwnd).
 // Cleared when the biome closes. Prevents stealing sibling Chrome windows
@@ -121,6 +123,8 @@ void SyncHotkeysFromDisk();
 bool ActivateBiome(const std::string& biomeId, std::string& status);
 bool DeactivateActiveBiome(std::string& status);
 bool ToggleBiome(const std::string& biomeId, std::string& status);
+
+json SaveLayoutRequest(const json& request);
 
 std::string ExecutableName(const std::string& path) {
     return std::filesystem::path(path).filename().string();
@@ -348,6 +352,7 @@ bool ResolveZoneMonitor(const SelectedBox& box, int& outMonitorIndex, std::strin
 
 void SendMonitorsChangedToUi() {
     const std::string payload = MonitorManager::SerializeMonitorsJson();
+    if (g_ipc) g_ipc->Broadcast("MONITOR_CHANGED", {{"topology", json::parse(payload)}});
     WebViewWindow::SendMessageToUI(
         std::string("{\"action\":\"MONITORS_CHANGED\",\"payload\":") + payload + "}"
     );
@@ -581,6 +586,7 @@ bool ActivateBiome(const std::string& biomeId, std::string& status) {
     if (placed > 0 || pendingLaunches > 0) {
         g_activeBiomeId = biomeId;
         NotifyActiveBiomeChanged();
+        if (g_ipc) g_ipc->Broadcast("LAYOUT_RESTORED", {{"id", biomeId}, {"phase", "placement-requested"}});
     } else {
         WebViewWindow::RestoreDashboard();
     }
@@ -676,6 +682,59 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     std::cout << "=== Biomes Workspace Engine Active ===" << std::endl;
     WriteRuntimeLog("[APP] Startup begin");
 
+    biomes::IpcBridge::Services ipcServices;
+    ipcServices.topology = [] { return json::parse(MonitorManager::SerializeMonitorsJson()); };
+    ipcServices.settings = [] { g_settings->ReconcileStartup(); return g_settings->Read(); };
+    ipcServices.updateSettings = [](const json& patch) {
+        const auto updated = g_settings->Update(patch);
+        if (g_ipc) g_ipc->Broadcast("SETTINGS_CHANGED", {{"settings", updated}});
+        return updated;
+    };
+    ipcServices.state = [] {
+        g_settings->ReconcileStartup();
+        std::vector<BiomeProfile> profiles;
+        if (!JsonManager::LoadBiomesFromFile(GetBiomesConfigPath(), profiles))
+            throw std::runtime_error("Could not read saved layouts");
+        return json{{"settings", g_settings->Read()},
+                    {"topology", json::parse(MonitorManager::SerializeMonitorsJson())},
+                    {"biomes", json::parse(JsonManager::LoadBiomesAsJsonString(GetBiomesConfigPath()))},
+                    {"activeId", g_activeBiomeId}};
+    };
+    ipcServices.saveLayout = SaveLayoutRequest;
+    ipcServices.loadLayout = [](const std::string& id) {
+        std::string status;
+        if (!ActivateBiome(id, status)) throw std::runtime_error(status);
+        return json{{"id", id}, {"status", status}, {"phase", "placement-requested"}};
+    };
+    ipcServices.snap = [](const json& request) {
+        const HWND target = WebViewWindow::GetSnapTarget();
+        if (!target || WindowScaler::IsOurProcessWindow(target) || !WindowScaler::IsMainApplicationWindow(target))
+            throw std::runtime_error("No active application window available");
+        const auto monitors = MonitorManager::GetConnectedMonitors();
+        MonitorBoxRef ref;
+        if (request.contains("monitorIndex") || request.contains("stableMonitorId")) {
+            ref.monitorIndex = request.value("monitorIndex", 0);
+            ref.stableMonitorId = request.value("stableMonitorId", "");
+        } else {
+            const auto handle = MonitorFromWindow(target, MONITOR_DEFAULTTONULL);
+            ref.monitorIndex = -1;
+            for (const auto& monitor : monitors) if (monitor.hMonitor == handle) ref.stableMonitorId = monitor.stableId;
+        }
+        const auto resolved = MonitorManager::ResolveMonitorForBox(ref, monitors);
+        if (resolved.resolvedIndex < 0) throw std::runtime_error("Target monitor unavailable");
+        SelectedBox box;
+        for (const auto& monitor : monitors) if (monitor.index == resolved.resolvedIndex) {
+            box.monitorIndex = monitor.index; box.monitorDevice = monitor.deviceName; box.stableMonitorId = monitor.stableId;
+        }
+        box.relX = request.at("relX"); box.relY = request.at("relY");
+        box.relWidth = request.at("relWidth"); box.relHeight = request.at("relHeight");
+        WindowScaler::CacheBiomeAppPreState(target, false);
+        if (!WindowScaler::ForceSnapToBox(target, box)) throw std::runtime_error("Window placement request failed");
+        return json{{"phase", "placement-requested"}};
+    };
+    g_ipc = std::make_unique<biomes::IpcBridge>(std::move(ipcServices), WebViewWindow::SendMessageToUI);
+    WebViewWindow::SetPageReadyCallback([] { if (g_ipc) g_ipc->PublishState(); });
+
     GridOverlay::SetCompletedCallback([](const std::vector<SelectedBox>& boxes) {
         WebViewWindow::RestoreDashboard();
         try {
@@ -700,7 +759,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         const std::string biomeId = HotkeyManager::ResolveBiomeId(hotkeyId);
         if (biomeId.empty()) return;
         std::string status;
-        ToggleBiome(biomeId, status);
+        const bool success = ToggleBiome(biomeId, status);
+        if (g_ipc) g_ipc->Broadcast("HOTKEY_TRIGGERED", {{"id", biomeId}, {"success", success}, {"activeId", g_activeBiomeId}});
         WebViewWindow::SendMessageToUI(
             "{\"action\":\"STATUS\",\"payload\":\"" + EscapeJsonString(status) + "\"}"
         );
@@ -714,6 +774,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     WebViewWindow::SetMessageReceivedCallback([](const std::string& message) {
         if (g_background->Stopping()) return;
+        if (g_ipc && g_ipc->Handle(message)) return;
         try {
             std::cout << "[IPC RECEIVED RAW]: " << message << std::endl;
             WriteRuntimeLog("[APP] IPC raw message: " + message);
@@ -727,19 +788,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             const std::string action = request.value("action", "");
             WriteRuntimeLog("[APP] Action extracted: " + action);
 
-            if (action == "GET_SETTINGS" || action == "UPDATE_SETTINGS") {
-                const auto requestId = request.value("requestId", "");
-                if (requestId.size() > 128) throw std::runtime_error("Invalid request ID");
-                json response = {{"action","SETTINGS_RESULT"},{"requestId",requestId}};
-                try {
-                    response["settings"] = action == "GET_SETTINGS" ? g_settings->Read() : g_settings->Update(request.at("settings"));
-                    response["success"] = true;
-                } catch (const std::exception& e) {
-                    response["success"] = false; response["error"] = e.what();
-                }
-                WebViewWindow::SendMessageToUI(response.dump());
-            }
-            else if (action == "SNAPSHOT_LAYOUT" || action == "RESTORE_LAYOUT" || action == "TOGGLE_GRID_OVERLAY") {
+            if (action == "SNAPSHOT_LAYOUT" || action == "RESTORE_LAYOUT" || action == "TOGGLE_GRID_OVERLAY") {
                 json response = {{"action", action + "_RESULT"}, {"success", false}};
                 try {
                     if (request.contains("requestId")) {
@@ -885,79 +934,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                 SendSavedBiomesToUi();
             }
             else if (action == "SAVE_BIOME") {
-                const std::string name = request.value("name", "");
-                if (name.empty() || !request.contains("boxes") || !request["boxes"].is_array()) {
-                    WebViewWindow::SendMessageToUI(R"({"action":"STATUS","payload":"A Biome name and layout boxes are required."})");
-                    return;
+                try {
+                    const auto saved = SaveLayoutRequest(request);
+                    WebViewWindow::SendMessageToUI(json({{"action","BIOME_SAVED"},{"id",saved.at("id")}}).dump());
+                } catch (const std::exception& error) {
+                    WebViewWindow::SendMessageToUI(json({{"action","SAVE_FAILED"},{"payload",error.what()}}).dump());
                 }
-
-                BiomeProfile profile;
-                profile.id = request.value("id", "");
-                if (profile.id.empty()) profile.id = "biome-" + std::to_string(GetTickCount64());
-                profile.name = name;
-                profile.hotkey = request.value("hotkey", "");
-                profile.coverImagePath = request.value("coverImagePath", "");
-                for (const auto& value : request["boxes"]) {
-                    profile.layout.push_back(DeserializeBox(value));
-                }
-
-                std::vector<BiomeProfile> profiles;
-                const auto configPath = GetBiomesConfigPath();
-                if (!JsonManager::LoadBiomesFromFile(configPath, profiles)) {
-                    WebViewWindow::SendMessageToUI(R"({"action":"STATUS","payload":"Could not read saved Biomes."})");
-                    return;
-                }
-
-                if (!profile.hotkey.empty()) {
-                    UINT modifiers = 0, key = 0;
-                    if (!HotkeyManager::ParseHotkeyString(profile.hotkey, modifiers, key)) {
-                        WebViewWindow::SendMessageToUI(R"({"action":"SAVE_FAILED","payload":"Choose a valid shortcut."})");
-                        return;
-                    }
-                    bool ownsShortcut = false;
-                    for (const auto& existing : profiles) {
-                        UINT oldModifiers = 0, oldKey = 0;
-                        if (!HotkeyManager::ParseHotkeyString(existing.hotkey, oldModifiers, oldKey)) continue;
-                        if (oldModifiers != modifiers || oldKey != key) continue;
-                        if (existing.id != profile.id) {
-                            WebViewWindow::SendMessageToUI(R"({"action":"SAVE_FAILED","payload":"Another biome already uses this shortcut."})");
-                            return;
-                        }
-                        ownsShortcut = true;
-                    }
-                    if (!ownsShortcut) {
-                        constexpr int validationId = 0xBFFE;
-                        if (!RegisterHotKey(g_background->Hwnd(), validationId, modifiers | MOD_NOREPEAT, key)) {
-                            WebViewWindow::SendMessageToUI(R"({"action":"SAVE_FAILED","payload":"Windows or another app uses this shortcut. Choose a different one."})");
-                            return;
-                        }
-                        UnregisterHotKey(g_background->Hwnd(), validationId);
-                    }
-                }
-                bool replaced = false;
-                for (auto& existing : profiles) {
-                    if (existing.id == profile.id) {
-                        profile.layoutVariants = existing.layoutVariants;
-                        JsonManager::EnrichProfileForSave(profile);
-                        existing = profile;
-                        replaced = true;
-                        break;
-                    }
-                }
-                if (!replaced) {
-                    JsonManager::EnrichProfileForSave(profile);
-                    profiles.push_back(profile);
-                }
-
-                std::filesystem::create_directories(configPath.parent_path());
-                if (!JsonManager::SaveBiomesToFile(configPath, profiles)) {
-                    WebViewWindow::SendMessageToUI(R"({"action":"STATUS","payload":"Could not save this Biome."})");
-                    return;
-                }
-
-                SyncHotkeysFromDisk();
-                SendSavedBiomesToUi();
-                WebViewWindow::SendMessageToUI(json({{"action","BIOME_SAVED"},{"id",profile.id}}).dump());
             }
             else if (action == "FIX_BIOME_LAYOUT") {
                 const std::string biomeId = request.value("id", "");
@@ -1071,7 +1053,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         else MessageBoxW(WebViewWindow::GetHwnd(),L"The tray icon is unavailable. The dashboard will remain open so biomes stays accessible.",L"biomes",MB_OK);
     });
     background.startupEnabled = [&] { return registration.IsEnabled(); };
-    background.toggleStartup = [&] { settings.Update({{"launchAtStartup", !registration.IsEnabled()}}); };
+    background.toggleStartup = [&] {
+        const auto updated = settings.Update({{"launchAtStartup", !registration.IsEnabled()}});
+        if (g_ipc) g_ipc->Broadcast("SETTINGS_CHANGED", {{"settings", updated}});
+    };
 
     SyncHotkeysFromDisk();
 
@@ -1097,6 +1082,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         HotkeyManager::Clear(background.Hwnd());
         LaunchPanel::Shutdown();
         WebViewWindow::Shutdown();
+        g_ipc.reset();
     };
     if (!options.silent || !background.CanHide()) {
         try { background.open(); }
@@ -1165,4 +1151,74 @@ void SendSavedBiomesToUi() {
         "{\"action\":\"LOADED_BIOMES\",\"biomes\":" + biomes +
         ",\"activeId\":\"" + EscapeJsonString(g_activeBiomeId) + "\"}"
     );
+}
+
+json SaveLayoutRequest(const json& request) {
+    const std::string name = request.value("name", "");
+    if (name.empty() || !request.contains("boxes") || !request["boxes"].is_array()) {
+        throw std::runtime_error("A Biome name and layout boxes are required.");
+    }
+
+    BiomeProfile profile;
+    profile.id = request.value("id", "");
+    if (profile.id.empty()) profile.id = "biome-" + std::to_string(GetTickCount64());
+    profile.name = name;
+    profile.hotkey = request.value("hotkey", "");
+    profile.coverImagePath = request.value("coverImagePath", "");
+    for (const auto& value : request["boxes"]) {
+        profile.layout.push_back(DeserializeBox(value));
+    }
+
+    std::vector<BiomeProfile> profiles;
+    const auto configPath = GetBiomesConfigPath();
+    if (!JsonManager::LoadBiomesFromFile(configPath, profiles)) {
+        throw std::runtime_error("Could not read saved Biomes.");
+    }
+
+    if (!profile.hotkey.empty()) {
+        UINT modifiers = 0, key = 0;
+        if (!HotkeyManager::ParseHotkeyString(profile.hotkey, modifiers, key)) {
+            throw std::runtime_error("Choose a valid shortcut.");
+        }
+        bool ownsShortcut = false;
+        for (const auto& existing : profiles) {
+            UINT oldModifiers = 0, oldKey = 0;
+            if (!HotkeyManager::ParseHotkeyString(existing.hotkey, oldModifiers, oldKey)) continue;
+            if (oldModifiers != modifiers || oldKey != key) continue;
+            if (existing.id != profile.id) {
+                throw std::runtime_error("Another biome already uses this shortcut.");
+            }
+            ownsShortcut = true;
+        }
+        if (!ownsShortcut) {
+            constexpr int validationId = 0xBFFE;
+            if (!RegisterHotKey(g_background->Hwnd(), validationId, modifiers | MOD_NOREPEAT, key)) {
+                throw std::runtime_error("Windows or another app uses this shortcut. Choose a different one.");
+            }
+            UnregisterHotKey(g_background->Hwnd(), validationId);
+        }
+    }
+    bool replaced = false;
+    for (auto& existing : profiles) {
+        if (existing.id == profile.id) {
+            profile.layoutVariants = existing.layoutVariants;
+            JsonManager::EnrichProfileForSave(profile);
+            existing = profile;
+            replaced = true;
+            break;
+        }
+    }
+    if (!replaced) {
+        JsonManager::EnrichProfileForSave(profile);
+        profiles.push_back(profile);
+    }
+
+    std::filesystem::create_directories(configPath.parent_path());
+    if (!JsonManager::SaveBiomesToFile(configPath, profiles)) {
+        throw std::runtime_error("Could not save this Biome.");
+    }
+
+    SyncHotkeysFromDisk();
+    SendSavedBiomesToUi();
+    return {{"id", profile.id}};
 }

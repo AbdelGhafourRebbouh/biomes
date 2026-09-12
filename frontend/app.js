@@ -344,11 +344,68 @@
     chromeBar.addEventListener('dblclick', event => {
         if (!event.target.closest('button')) send('WINDOW_CONTROL', {command:'maximize'});
     });
-    document.querySelector('#retry-load').addEventListener('click', () => send('GET_SAVED_BIOMES'));
+    document.querySelector('#retry-load').addEventListener('click', () => send('GET_NATIVE_STATE'));
+    const autostart = document.querySelector('#native-autostart');
+    const monitorCount = document.querySelector('#native-monitor-count');
+    let startupRequest = '';
+    let confirmedStartup = false;
+    let startupTimer;
+    let requestSequence = 0;
+    const applySettings = settings => {
+        if (typeof settings?.launchAtStartup !== 'boolean') return;
+        confirmedStartup = settings.launchAtStartup;
+        autostart.checked = confirmedStartup;
+        autostart.disabled = !host || Boolean(startupRequest);
+    };
+    const applyTopology = topology => {
+        if (!Array.isArray(topology?.monitors)) return;
+        const count = topology.monitors.length;
+        monitorCount.textContent = `${count} display${count === 1 ? '' : 's'} connected`;
+    };
+    autostart.addEventListener('change', () => {
+        if (startupRequest) return;
+        startupRequest = `startup-${++requestSequence}`;
+        autostart.disabled = true;
+        send('TOGGLE_AUTOSTART', {enabled: autostart.checked, requestId: startupRequest});
+        startupTimer = setTimeout(() => {
+            startupRequest = '';
+            autostart.checked = confirmedStartup;
+            autostart.disabled = !host;
+            announce('Startup setting could not be confirmed. Refreshing settings.');
+            send('GET_SETTINGS');
+        }, 10000);
+    });
     host?.addEventListener('message', event => {
         let data;
         try { data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data; } catch { return; }
-        if (data?.action === 'LOADED_BIOMES' && Array.isArray(data.biomes)) {
+        if (data?.action === 'NATIVE_STATE' || data?.action === 'GET_NATIVE_STATE_RESULT') {
+            if (!data.success) {
+                document.querySelector('#loading-message').textContent = data.error || 'Could not load native state.';
+                document.querySelector('.loading-blocks').hidden = true;
+                announce(data.error || 'Could not load native state.');
+                return;
+            }
+            applySettings(data.state?.settings);
+            applyTopology(data.state?.topology);
+            if (Array.isArray(data.state?.biomes)) {
+                profiles = data.state.biomes; activeId = data.state.activeId || ''; loaded = true;
+                renderCards();
+            }
+        } else if (['SETTINGS_CHANGED', 'SETTINGS_RESULT', 'TOGGLE_AUTOSTART_RESULT'].includes(data?.action)) {
+            if (data.action === 'TOGGLE_AUTOSTART_RESULT') {
+                if (data.requestId !== startupRequest) return;
+                clearTimeout(startupTimer); startupRequest = '';
+                if (!data.success) { autostart.checked = confirmedStartup; announce(data.error || 'Could not change startup setting.'); }
+                autostart.disabled = !host;
+            }
+            applySettings(data.settings);
+        } else if (data?.action === 'MONITOR_CHANGED') {
+            applyTopology(data.topology);
+        } else if (data?.action === 'LAYOUT_RESTORED') {
+            activeId = data.id || ''; renderCards();
+        } else if (data?.action === 'HOTKEY_TRIGGERED') {
+            activeId = data.activeId || ''; renderCards();
+        } else if (data?.action === 'LOADED_BIOMES'  && Array.isArray(data.biomes)) {
             profiles=data.biomes; activeId=data.activeId || ''; loaded=true;
             renderCards();
             if (pendingDelete && !profiles.some(profile => profile.id === pendingDelete)) {
@@ -375,7 +432,7 @@
         }
     });
     window.addEventListener('DOMContentLoaded', () => {
-        if (host) send('GET_SAVED_BIOMES');
+        if (host) send('GET_NATIVE_STATE');
         else {
             document.querySelector('#loading-message').textContent='Open biomes.exe to load your saved workspaces.';
             document.querySelector('.loading-blocks').hidden=true;

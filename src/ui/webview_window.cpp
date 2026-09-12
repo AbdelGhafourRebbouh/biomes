@@ -17,6 +17,21 @@
 
 namespace {
 constexpr UINT kDispatchWebMessage = WM_APP + 71;
+constexpr UINT kPageReady = WM_APP + 72;
+std::function<void()> pageReadyCallback;
+bool pageReady = false;
+EventRegistrationToken messageToken{}, navigationToken{}, completedToken{};
+HWND lastAppWindow = nullptr;
+DWORD lastAppPid = 0;
+unsigned long long hostGeneration = 0;
+HMODULE loaderModule = nullptr;
+
+void RememberAppWindow(HWND hwnd) {
+    DWORD pid = 0;
+    if (hwnd && IsWindow(hwnd)) GetWindowThreadProcessId(hwnd, &pid);
+    if (pid && pid != GetCurrentProcessId()) { lastAppWindow = hwnd; lastAppPid = pid; }
+}
+
 std::deque<std::string> pendingWebMessages;
 bool dispatchingWebMessage = false;
 std::function<void()> showRequested, closeRequested;
@@ -35,114 +50,33 @@ typedef HRESULT (__stdcall *PFN_CreateCoreWebView2EnvironmentWithOptions)(
     ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler* environmentCreatedHandler
 );
 
-// ============================================================================
-// Native MinGW COM Callback Implementations (Zero WRL dependencies)
-// ============================================================================
-
-template <typename TInterface>
-class ComCallbackImpl;
-
-// 1. Environment Creation Callback
-template <>
-class ComCallbackImpl<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler> 
-    : public ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler {
-private:
-    std::function<HRESULT(HRESULT, ICoreWebView2Environment*)> m_func;
-    long m_refCount = 1;
-
+// Minimal COM callbacks with correct interface identity and owned references.
+template <typename Interface, typename... Args>
+class ComCallbackImpl final : public Interface {
+    std::function<HRESULT(Args...)> callback_;
+    long references_ = 1;
 public:
-    ComCallbackImpl(std::function<HRESULT(HRESULT, ICoreWebView2Environment*)> func) 
-        : m_func(std::move(func)) {}
-
-    HRESULT __stdcall QueryInterface(REFIID riid, void** ppv) override {
-        if (!ppv) return E_POINTER;
-        *ppv = static_cast<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler*>(this);
-        AddRef();
-        return S_OK;
+    explicit ComCallbackImpl(std::function<HRESULT(Args...)> callback) : callback_(std::move(callback)) {}
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void** result) override {
+        if (!result) return E_POINTER;
+        *result = nullptr;
+        if (id != __uuidof(IUnknown) && id != __uuidof(Interface)) return E_NOINTERFACE;
+        *result = static_cast<Interface*>(this); AddRef(); return S_OK;
     }
-
-    unsigned long __stdcall AddRef() override { return InterlockedIncrement(&m_refCount); }
-    unsigned long __stdcall Release() override {
-        unsigned long count = InterlockedDecrement(&m_refCount);
-        if (count == 0) { delete this; return 0; }
-        return count;
+    ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&references_); }
+    ULONG STDMETHODCALLTYPE Release() override {
+        const auto remaining = InterlockedDecrement(&references_);
+        if (!remaining) delete this;
+        return remaining;
     }
-    HRESULT __stdcall Invoke(HRESULT result, ICoreWebView2Environment* created_environment) override {
-        if (m_func) return m_func(result, created_environment);
-        return S_OK;
+    HRESULT STDMETHODCALLTYPE Invoke(Args... args) override {
+        try { return callback_(args...); } catch (...) { return E_FAIL; }
     }
 };
 
-// 2. Controller Creation Callback
-template <>
-class ComCallbackImpl<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler> 
-    : public ICoreWebView2CreateCoreWebView2ControllerCompletedHandler {
-private:
-    std::function<HRESULT(HRESULT, ICoreWebView2Controller*)> m_func;
-    long m_refCount = 1;
-
-public:
-    ComCallbackImpl(std::function<HRESULT(HRESULT, ICoreWebView2Controller*)> func) 
-        : m_func(std::move(func)) {}
-
-    HRESULT __stdcall QueryInterface(REFIID riid, void** ppv) override {
-        if (!ppv) return E_POINTER;
-        *ppv = static_cast<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler*>(this);
-        AddRef();
-        return S_OK;
-    }
-
-    unsigned long __stdcall AddRef() override { return InterlockedIncrement(&m_refCount); }
-    unsigned long __stdcall Release() override {
-        unsigned long count = InterlockedDecrement(&m_refCount);
-        if (count == 0) { delete this; return 0; }
-        return count;
-    }
-    HRESULT __stdcall Invoke(HRESULT result, ICoreWebView2Controller* created_controller) override {
-        if (m_func) return m_func(result, created_controller);
-        return S_OK;
-    }
-};
-
-// 3. Web Message Received Callback (IPC)
-template <>
-class ComCallbackImpl<ICoreWebView2WebMessageReceivedEventHandler> 
-    : public ICoreWebView2WebMessageReceivedEventHandler {
-private:
-    std::function<HRESULT(ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs*)> m_func;
-    long m_refCount = 1;
-
-public:
-    ComCallbackImpl(std::function<HRESULT(ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs*)> func) 
-        : m_func(std::move(func)) {}
-
-    HRESULT __stdcall QueryInterface(REFIID riid, void** ppv) override {
-        if (!ppv) return E_POINTER;
-        *ppv = static_cast<ICoreWebView2WebMessageReceivedEventHandler*>(this);
-        AddRef();
-        return S_OK;
-    }
-
-    unsigned long __stdcall AddRef() override { return InterlockedIncrement(&m_refCount); }
-    unsigned long __stdcall Release() override {
-        unsigned long count = InterlockedDecrement(&m_refCount);
-        if (count == 0) { delete this; return 0; }
-        return count;
-    }
-    HRESULT __stdcall Invoke(ICoreWebView2* sender, ICoreWebView2WebMessageReceivedEventArgs* args) override {
-        try {
-            if (m_func) return m_func(sender, args);
-            return S_OK;
-        } catch (...) {
-            // C++ exceptions must not escape a COM callback boundary.
-            return E_FAIL;
-        }
-    }
-};
-
-template <typename TInterface, typename F>
-TInterface* CreateCallbackRaw(F&& func) {
-    return new ComCallbackImpl<TInterface>(std::forward<F>(func));
+template <typename Interface, typename... Args, typename F>
+Interface* CreateCallbackRaw(F&& callback) {
+    return new ComCallbackImpl<Interface, Args...>(std::forward<F>(callback));
 }
 
 // ============================================================================
@@ -159,6 +93,8 @@ std::function<void()> WebViewWindow::s_onDisplayChanged = nullptr;
 bool WebViewWindow::Initialize(HINSTANCE hInstance, int nCmdShow, const std::string& startUrl) {
     if (s_hwnd) return true;
     if (shuttingDown) return false;
+    ++hostGeneration;
+    RememberAppWindow(GetForegroundWindow());
     const int urlLength = MultiByteToWideChar(CP_UTF8, 0, startUrl.data(), static_cast<int>(startUrl.size()), nullptr, 0);
     trustedPage.resize(urlLength);
     MultiByteToWideChar(CP_UTF8, 0, startUrl.data(), static_cast<int>(startUrl.size()), trustedPage.data(), urlLength);
@@ -200,94 +136,107 @@ bool WebViewWindow::Initialize(HINSTANCE hInstance, int nCmdShow, const std::str
     return true;
 }
 
-void WebViewWindow::InitWebView(const std::string& startUrl) {
-    HMODULE hLoader = LoadLibraryW(L"WebView2Loader.dll");
-    if (!hLoader) {
-        std::cerr << "[WEBVIEW ERROR] Could not load WebView2Loader.dll!" << std::endl;
-        return;
-    }
-
-    auto pfnCreateEnvironment = reinterpret_cast<PFN_CreateCoreWebView2EnvironmentWithOptions>(
-        GetProcAddress(hLoader, "CreateCoreWebView2EnvironmentWithOptions")
-    );
-    if (!pfnCreateEnvironment) {
-        std::cerr << "[WEBVIEW ERROR] Could not locate CreateCoreWebView2EnvironmentWithOptions inside DLL." << std::endl;
-        return;
-    }
-
-    const std::wstring userDataFolder = biomes::AppPaths::WebViewData().wstring();
-
-    auto envHandler = CreateCallbackRaw<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
-        [startUrl](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
-            if (shuttingDown || !s_hwnd) return S_OK;
-            if (FAILED(result) || !env) return result;
-
-            auto controllerHandler = CreateCallbackRaw<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
-                [startUrl](HRESULT res, ICoreWebView2Controller* controller) -> HRESULT {
-                    if (shuttingDown || !s_hwnd) { if (controller) controller->Close(); return S_OK; }
-                    if (FAILED(res) || !controller) return res;
-
-                    s_controller = controller;
-                    s_controller->AddRef();
-                    
-                    s_controller->get_CoreWebView2(&s_webview);
-
-                    RECT bounds;
-                    GetClientRect(s_hwnd, &bounds);
-                    s_controller->put_Bounds(bounds);
-
-                    EventRegistrationToken token;
-                    auto msgHandler = CreateCallbackRaw<ICoreWebView2WebMessageReceivedEventHandler>(
-                        [](ICoreWebView2* sender, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
-                            if (shuttingDown) return S_OK;
-                            LPWSTR source = nullptr;
-                            if (FAILED(args->get_Source(&source)) || !source) return S_OK;
-                            std::wstring origin(source); CoTaskMemFree(source);
-                            origin = origin.substr(0, origin.find_first_of(L"?#"));
-                            if (origin != trustedPage) return S_OK;
-                            LPWSTR jsonString = nullptr;
-                            if (SUCCEEDED(args->get_WebMessageAsJson(&jsonString)) && jsonString) {
-                                std::wstring wMsg(jsonString);
-                                CoTaskMemFree(jsonString);
-
-                                const int length = WideCharToMultiByte(CP_UTF8, 0, wMsg.data(), static_cast<int>(wMsg.size()), nullptr, 0, nullptr, nullptr);
-                                std::string msg(length, '\0');
-                                if (length > 0) WideCharToMultiByte(CP_UTF8, 0, wMsg.data(), static_cast<int>(wMsg.size()), msg.data(), length, nullptr, nullptr);
-                                // Run native commands after leaving WebView2's COM event.
-                                pendingWebMessages.push_back(std::move(msg));
-                                if (!PostMessage(s_hwnd, kDispatchWebMessage, 0, 0))
-                                    pendingWebMessages.pop_back();
-                            }
-                            return S_OK;
-                        }
-                    );
-                    s_webview->add_WebMessageReceived(msgHandler, &token);
-
-                    s_webview->Navigate(trustedPage.c_str());
-
-                    std::cout << "[WEBVIEW] Successfully loaded: " << startUrl << std::endl;
+void WebViewWindow::InitWebView(const std::string&) {
+    if (!loaderModule) loaderModule = LoadLibraryW((biomes::AppPaths::ExecutableDirectory() / L"WebView2Loader.dll").c_str());
+    if (!loaderModule) { std::cerr << "[WEBVIEW] Loader unavailable" << std::endl; return; }
+    const auto create = reinterpret_cast<PFN_CreateCoreWebView2EnvironmentWithOptions>(
+        GetProcAddress(loaderModule, "CreateCoreWebView2EnvironmentWithOptions"));
+    if (!create) return;
+    const auto generation = hostGeneration;
+    auto environmentHandler = CreateCallbackRaw<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler,
+        HRESULT, ICoreWebView2Environment*>([generation](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
+        if (shuttingDown || !s_hwnd || generation != hostGeneration) return S_OK;
+        if (FAILED(result) || !env) return FAILED(result) ? result : E_FAIL;
+        auto controllerHandler = CreateCallbackRaw<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler,
+            HRESULT, ICoreWebView2Controller*>([generation](HRESULT result, ICoreWebView2Controller* controller) -> HRESULT {
+            if (shuttingDown || !s_hwnd || generation != hostGeneration) {
+                if (controller) controller->Close(); return S_OK;
+            }
+            if (FAILED(result) || !controller) return FAILED(result) ? result : E_FAIL;
+            s_controller = controller; s_controller->AddRef();
+            if (FAILED(controller->get_CoreWebView2(&s_webview)) || !s_webview) {
+                controller->Close(); s_controller->Release(); s_controller = nullptr; return E_FAIL;
+            }
+            RECT bounds{}; GetClientRect(s_hwnd, &bounds);
+            controller->put_Bounds(bounds);
+            controller->put_IsVisible(IsWindowVisible(s_hwnd) && !IsIconic(s_hwnd));
+            auto received = CreateCallbackRaw<ICoreWebView2WebMessageReceivedEventHandler,
+                ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs*>(
+                [](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
+                    if (shuttingDown) return S_OK;
+                    LPWSTR source = nullptr;
+                    if (FAILED(args->get_Source(&source)) || !source) return S_OK;
+                    std::wstring origin(source); CoTaskMemFree(source);
+                    origin.resize(origin.find_first_of(L"?#") == std::wstring::npos ? origin.size() : origin.find_first_of(L"?#"));
+                    if (origin != trustedPage) return S_OK;
+                    LPWSTR text = nullptr;
+                    if (FAILED(args->get_WebMessageAsJson(&text)) || !text) return S_OK;
+                    std::wstring wide(text); CoTaskMemFree(text);
+                    if (wide.size() > 16 * 1024 * 1024 || pendingWebMessages.size() >= 128) return E_INVALIDARG;
+                    const int count = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide.data(),
+                        static_cast<int>(wide.size()), nullptr, 0, nullptr, nullptr);
+                    if (count <= 0) return E_INVALIDARG;
+                    std::string message(count, '\0');
+                    WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide.data(), static_cast<int>(wide.size()),
+                        message.data(), count, nullptr, nullptr);
+                    pendingWebMessages.push_back(std::move(message));
+                    if (!PostMessage(s_hwnd, kDispatchWebMessage, 0, 0)) pendingWebMessages.pop_back();
                     return S_OK;
-                }
-            );
-
-            env->CreateCoreWebView2Controller(s_hwnd, controllerHandler);
-            return S_OK;
-        }
-    );
-
-    pfnCreateEnvironment(nullptr, userDataFolder.c_str(), nullptr, envHandler);
+                });
+            const HRESULT messageResult = s_webview->add_WebMessageReceived(received, &messageToken);
+            received->Release();
+            auto navigating = CreateCallbackRaw<ICoreWebView2NavigationStartingEventHandler,
+                ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs*>(
+                [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs* args) -> HRESULT {
+                    LPWSTR uri = nullptr;
+                    if (FAILED(args->get_Uri(&uri)) || !uri) { args->put_Cancel(TRUE); return S_OK; }
+                    std::wstring url(uri); CoTaskMemFree(uri);
+                    url = url.substr(0, url.find_first_of(L"?#"));
+                    if (url != trustedPage) { args->put_Cancel(TRUE); return S_OK; }
+                    pageReady = false; pendingWebMessages.clear();
+                    return S_OK;
+                });
+            const HRESULT navigationResult = s_webview->add_NavigationStarting(navigating, &navigationToken);
+            navigating->Release();
+            auto completed = CreateCallbackRaw<ICoreWebView2NavigationCompletedEventHandler,
+                ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*>(
+                [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT {
+                    BOOL success = FALSE; args->get_IsSuccess(&success);
+                    if (!shuttingDown && success) PostMessage(s_hwnd, kPageReady, 0, 0);
+                    return S_OK;
+                });
+            const HRESULT completedResult = s_webview->add_NavigationCompleted(completed, &completedToken);
+            completed->Release();
+            if (FAILED(messageResult) || FAILED(navigationResult) || FAILED(completedResult)) return E_FAIL;
+            return s_webview->Navigate(trustedPage.c_str());
+        });
+        const HRESULT resultController = env->CreateCoreWebView2Controller(s_hwnd, controllerHandler);
+        controllerHandler->Release();
+        return resultController;
+    });
+    const HRESULT result = create(nullptr, biomes::AppPaths::WebViewData().c_str(), nullptr, environmentHandler);
+    environmentHandler->Release();
+    if (FAILED(result)) std::cerr << "[WEBVIEW] Environment creation failed: " << result << std::endl;
 }
 
 void WebViewWindow::SendMessageToUI(const std::string& jsonPayload) {
-    if (s_webview) {
-        int size_needed = MultiByteToWideChar(CP_UTF8, 0, jsonPayload.c_str(), (int)jsonPayload.size(), NULL, 0);
-        std::wstring wPayload(size_needed, 0);
-        MultiByteToWideChar(CP_UTF8, 0, jsonPayload.c_str(), (int)jsonPayload.size(), &wPayload[0], size_needed);
-
-        s_webview->PostWebMessageAsJson(wPayload.c_str());
-        std::cout << "[IPC C++ -> JS] Sent payload: " << jsonPayload << std::endl;
-    }
+    if (shuttingDown || !s_webview || !pageReady || jsonPayload.empty()) return;
+    const int count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, jsonPayload.data(),
+        static_cast<int>(jsonPayload.size()), nullptr, 0);
+    if (count <= 0) return;
+    std::wstring payload(count, '\0');
+    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, jsonPayload.data(), static_cast<int>(jsonPayload.size()), payload.data(), count);
+    const HRESULT result = s_webview->PostWebMessageAsJson(payload.c_str());
+    if (FAILED(result)) std::cerr << "[IPC] PostWebMessageAsJson failed: " << result << std::endl;
 }
+
+HWND WebViewWindow::GetSnapTarget() {
+    RememberAppWindow(GetForegroundWindow());
+    DWORD pid = 0;
+    if (IsWindow(lastAppWindow)) GetWindowThreadProcessId(lastAppWindow, &pid);
+    return pid && pid == lastAppPid ? lastAppWindow : nullptr;
+}
+void WebViewWindow::SetPageReadyCallback(std::function<void()> callback) { pageReadyCallback = std::move(callback); }
 
 void WebViewWindow::SetMessageReceivedCallback(std::function<void(const std::string&)> callback) {
     s_onMessageReceived = callback;
@@ -315,11 +264,18 @@ void WebViewWindow::RunMessageLoop() {
 
 LRESULT CALLBACK WebViewWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
+        case kPageReady:
+            if (!shuttingDown && s_webview) {
+                pageReady = true;
+                try { if (pageReadyCallback) pageReadyCallback(); } catch (...) {}
+                if (!pendingWebMessages.empty()) PostMessage(hwnd, kDispatchWebMessage, 0, 0);
+            }
+            return 0;
         case WM_CLOSE:
             if (!shuttingDown && closeRequested) closeRequested();
             return 0;
         case kDispatchWebMessage: {
-            if (dispatchingWebMessage || pendingWebMessages.empty()) return 0;
+            if (!pageReady || shuttingDown || dispatchingWebMessage || pendingWebMessages.empty()) return 0;
             std::string message = std::move(pendingWebMessages.front());
             pendingWebMessages.pop_front();
             dispatchingWebMessage = true;
@@ -387,14 +343,21 @@ LRESULT CALLBACK WebViewWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
                     // WebView2 can wedge if left "visible" while the host is minimized.
                     s_controller->put_IsVisible(FALSE);
                 } else {
-                    s_controller->put_IsVisible(TRUE);
+                    s_controller->put_IsVisible(IsWindowVisible(hwnd));
                     RECT bounds;
                     GetClientRect(hwnd, &bounds);
                     s_controller->put_Bounds(bounds);
                 }
             }
             break;
+        case WM_SHOWWINDOW:
+            if (s_controller) s_controller->put_IsVisible(wParam && !IsIconic(hwnd));
+            break;
+        case WM_MOVE:
+            if (s_controller) s_controller->NotifyParentWindowPositionChanged();
+            break;
         case WM_ACTIVATE:
+            if (LOWORD(wParam) != WA_INACTIVE) RememberAppWindow(reinterpret_cast<HWND>(lParam));
             if (LOWORD(wParam) != WA_INACTIVE && s_controller) {
                 s_controller->put_IsVisible(TRUE);
                 RECT bounds;
@@ -403,7 +366,14 @@ LRESULT CALLBACK WebViewWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
             }
             break;
         case WM_DESTROY:
+            ++hostGeneration; pageReady = false;
             pendingWebMessages.clear();
+            if (s_webview) {
+                s_webview->remove_WebMessageReceived(messageToken);
+                s_webview->remove_NavigationStarting(navigationToken);
+                s_webview->remove_NavigationCompleted(completedToken);
+            }
+            if (s_controller) s_controller->Close();
             if (s_webview) { s_webview->Release(); s_webview = nullptr; }
             if (s_controller) { s_controller->Release(); s_controller = nullptr; }
             s_hwnd = nullptr;
@@ -419,19 +389,11 @@ void WebViewWindow::RestoreDashboard() {
     if (!s_hwnd && showRequested) { showRequested(); return; }
     if (!s_hwnd || !IsWindow(s_hwnd)) return;
 
+    RememberAppWindow(GetForegroundWindow());
     EnableWindow(s_hwnd, TRUE);
 
-    WINDOWPLACEMENT wp{};
-    wp.length = sizeof(WINDOWPLACEMENT);
-    if (GetWindowPlacement(s_hwnd, &wp)) {
-        wp.showCmd = SW_SHOWNORMAL;
-        wp.flags &= ~WPF_RESTORETOMAXIMIZED;
-        wp.length = sizeof(WINDOWPLACEMENT);
-        SetWindowPlacement(s_hwnd, &wp);
-    }
-
-    ShowWindow(s_hwnd, SW_SHOW);
-    ShowWindow(s_hwnd, SW_RESTORE);
+    if (IsIconic(s_hwnd)) ShowWindow(s_hwnd, SW_RESTORE);
+    else ShowWindow(s_hwnd, SW_SHOW);
     SetWindowPos(s_hwnd, HWND_TOP, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
 
@@ -461,6 +423,7 @@ void WebViewWindow::Shutdown() {
     shuttingDown = true;
     showRequested = {}; closeRequested = {};
     s_onMessageReceived = {};
+    pageReadyCallback = {}; pageReady = false;
     pendingWebMessages.clear();
     if (s_controller) s_controller->Close();
     if (s_hwnd) DestroyWindow(s_hwnd);

@@ -31,6 +31,11 @@ public:
 
     // Native Win32 HWND used for global hotkey registration.
     static HWND GetHwnd();
+    static HWND GetSnapTarget();
+    static void SetPageReadyCallback(std::function<void()> callback);
+#ifdef BIOMES_STORAGE_TESTING
+    static ICoreWebView2Controller* ControllerForTests() { return s_controller; }
+#endif
 
     // Send JSON payload downstream from C++ to JavaScript
     static void SendMessageToUI(const std::string& jsonPayload);
