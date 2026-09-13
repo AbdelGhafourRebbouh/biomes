@@ -4,6 +4,8 @@
 #include <string>
 #include <functional>
 
+struct MonitorDetail;
+
 struct SelectedBox {
     int id = 0;
     int monitorIndex = 0;
@@ -55,6 +57,10 @@ public:
     static void HideOverlay();
     static bool IsVisible();
     static bool StartSnapping();
+    static bool RefreshDisplays();
+    static std::vector<SelectedBox> RecalculateBoxes(const std::vector<SelectedBox>& boxes,
+                                                     const std::vector<MonitorDetail>& monitors);
+    static void SetDisplayChangedCallback(std::function<void()> callback);
     static void SetCompletedCallback(std::function<void(const std::vector<SelectedBox>&)> cb);
     static void SetCancelledCallback(std::function<void()> cb);
 

@@ -40,6 +40,8 @@ const int HOTKEY_ID = 999;
 static const char* kOverlayClass = "BiomesGridOverlayFullscreen";
 
 namespace {
+std::function<void()> displayChanged;
+
 
 HWND ResolveRootWindow(HWND hwnd) {
     HWND root = GetAncestor(hwnd, GA_ROOT);
@@ -210,22 +212,7 @@ bool GridOverlay::ShowOverlayWithLayout(const std::vector<SelectedBox>& existing
                   << info.rect.right << "," << info.rect.bottom << std::endl;
     }
 
-    const std::string topologyHash = MonitorManager::GetTopologyHash(connected);
-    for (auto box : existingBoxes) {
-        const auto resolved = MonitorManager::ResolveMonitorForBox(
-            {box.stableMonitorId, box.monitorDevice, box.monitorIndex}, connected);
-        if (resolved.resolvedIndex < 0) continue;
-        const auto& monitor = connected[resolved.resolvedIndex];
-        RECT local{0, 0, monitor.width, monitor.height};
-        if (!WindowScaler::CalculateRelativeRect(local, box.relX, box.relY,
-                                                 box.relWidth, box.relHeight, box.pixelRect)) continue;
-        box.monitorIndex = monitor.index;
-        box.monitorDevice = monitor.deviceName;
-        box.stableMonitorId = monitor.stableId;
-        box.topologyHash = topologyHash;
-        box.id = static_cast<int>(s_savedBoxes.size()) + 1;
-        s_savedBoxes.push_back(std::move(box));
-    }
+    s_savedBoxes = RecalculateBoxes(existingBoxes, connected);
 
     HINSTANCE hInst = GetModuleHandle(nullptr);
 
@@ -322,12 +309,52 @@ void GridOverlay::HideOverlay() {
     s_isDragging = false;
 }
 
+std::vector<SelectedBox> GridOverlay::RecalculateBoxes(const std::vector<SelectedBox>& boxes,
+                                                        const std::vector<MonitorDetail>& monitors) {
+    auto result = boxes;
+    const auto topology = MonitorManager::GetTopologyHash(monitors);
+    int id = 0;
+    for (auto& box : result) {
+        const auto resolved = MonitorManager::ResolveMonitorForBox(
+            {box.stableMonitorId, box.monitorDevice, box.monitorIndex}, monitors);
+        box.monitorIndex = -1; box.pixelRect = {}; box.id = ++id;
+        for (const auto& monitor : monitors) {
+            if (resolved.resolvedIndex < 0 || monitor.index != resolved.resolvedIndex) continue;
+            RECT local{0, 0, monitor.rcWork.right - monitor.rcWork.left, monitor.rcWork.bottom - monitor.rcWork.top};
+            if (!WindowScaler::CalculateRelativeRect(local, box.relX, box.relY, box.relWidth, box.relHeight, box.pixelRect)) break;
+            box.monitorIndex = monitor.index; box.monitorDevice = monitor.deviceName;
+            box.stableMonitorId = monitor.stableId; box.topologyHash = topology;
+            break;
+        }
+    }
+    return result;
+}
+
+void GridOverlay::SetDisplayChangedCallback(std::function<void()> callback) { displayChanged = std::move(callback); }
+
+bool GridOverlay::RefreshDisplays() {
+    if (!IsVisible()) return true;
+    const auto boxes = s_savedBoxes;
+    const bool snapping = s_isSnappingMode;
+    const auto theme = s_theme;
+    const int rows = s_rows, columns = s_cols;
+    if (MonitorManager::GetConnectedMonitors().empty()) {
+        // Keep the draft and handles so the next display notification can recover it.
+        for (const auto& monitor : s_monitors) ShowWindow(monitor.hwndOverlay, SW_HIDE);
+        return true;
+    }
+    if (!ShowOverlayWithLayout(boxes, rows, columns, theme)) return false;
+    if (snapping) StartSnapping();
+    return true;
+}
+
 bool GridOverlay::IsVisible() {
     return !s_monitors.empty() && s_monitors.front().hwndOverlay != nullptr;
 }
 
 bool GridOverlay::StartSnapping() {
-    if (!IsVisible() || s_savedBoxes.empty()) return false;
+    if (!IsVisible() || std::none_of(s_savedBoxes.begin(), s_savedBoxes.end(),
+        [](const SelectedBox& box) { return box.monitorIndex >= 0; })) return false;
     s_isSnappingMode = true;
     s_hoveredBoxId = -1;
     for (auto& monitor : s_monitors) {
@@ -438,6 +465,10 @@ void GridOverlay::DrawGrid(HDC hdc, HWND, int mIdx) {
 LRESULT CALLBACK GridOverlay::WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     const int mIdx = static_cast<int>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
     switch (msg) {
+        case WM_DPICHANGED:
+        case WM_DISPLAYCHANGE:
+            if (displayChanged) displayChanged();
+            return 0;
         case WM_PAINT: {
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hwnd, &ps);

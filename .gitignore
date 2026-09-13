@@ -10,6 +10,7 @@ build-step3-review/
 bin/
 obj/
 out/
+dist/
 *.o
 *.obj
 *.exe

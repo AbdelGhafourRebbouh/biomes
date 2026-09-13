@@ -44,8 +44,12 @@ Run:
 The build copies `index.html` and `WebView2Loader.dll` into the output folder. Saved Biomes live in:
 
 ```text
-build/Release/config/biomes.json
+%LOCALAPPDATA%/biomes/config/biomes.json
 ```
+
+## Release packaging
+
+See [RELEASE.md](RELEASE.md) for ZIP deployment and the bundled WebView2 Evergreen bootstrapper. Run `.\scripts\package_release.ps1` to build, test, and package under `dist/`.
 
 ## Hotkeys
 
@@ -113,6 +117,10 @@ This is an early public V1. Useful feedback areas:
 - Multi-monitor edge cases  
 
 Please open an issue with your Windows version, monitor setup, and what you expected vs what happened.
+
+## support biomes
+
+[![Sponsor on Ko-fi](https://img.shields.io/badge/Sponsor-Ko--fi-ff5e5b?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/abdelghafourrebbouh)
 
 ## License
 

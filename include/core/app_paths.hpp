@@ -1,5 +1,6 @@
 #pragma once
 #include <filesystem>
+#include <string>
 
 namespace biomes {
 class AppPaths final {
@@ -14,6 +15,7 @@ public:
     static std::filesystem::path BiomesFile();
     static std::filesystem::path SettingsFile();
     static std::filesystem::path RuntimeLog();
+    static void LogError(const std::string& message) noexcept;
     static std::filesystem::path ExecutableDirectory();
 #ifdef BIOMES_STORAGE_TESTING
     // Compiled out of production. Never redirect real user data in tests.

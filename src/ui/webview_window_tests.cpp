@@ -1,4 +1,4 @@
-// Callback ABI checks plus a hidden WebView2 with an isolated temporary profile.
+// Callback ABI checks and WebView2 integration with an isolated temporary profile.
 #include "webview_window.cpp"
 #include <stdexcept>
 #include <fstream>
@@ -79,7 +79,7 @@ int main() {
         // Load the actual shipped dashboard and verify the native-state consumer.
         ICoreWebView2* dashboard = nullptr;
         require(SUCCEEDED(retained->get_CoreWebView2(&dashboard)) && dashboard, "dashboard interface");
-        struct ViewGuard { ICoreWebView2* value; ~ViewGuard() { value->Release(); } } viewGuard{dashboard};
+        struct ViewGuard { ICoreWebView2* value; ~ViewGuard() { if (value) value->Release(); } } viewGuard{dashboard};
         const auto dashboardUrl = fileUrl(biomes::AppPaths::ExecutableDirectory() / L"index.html");
         const int wideCount = MultiByteToWideChar(CP_UTF8, 0, dashboardUrl.data(), static_cast<int>(dashboardUrl.size()), nullptr, 0);
         trustedPage.resize(wideCount);
@@ -124,9 +124,132 @@ int main() {
             require(evaluated, "dashboard script callback");
         }
         require(domVerified, "native startup setting and monitor count reflected in dashboard DOM");
+        // Real animation sampling needs a visible controller (hidden pages throttle timers).
+        ShowWindow(WebViewWindow::GetHwnd(), SW_SHOWNOACTIVATE);
+        retained->put_IsVisible(TRUE);
+        // Exercise actual CSS transitions while native state arrives in the collapsed drawer.
+        const auto checkScript = [&](const wchar_t* script) {
+            bool passed = false;
+            const auto deadline = GetTickCount64() + 5000;
+            while (!passed && GetTickCount64() < deadline) {
+                bool evaluated = false;
+                auto handler = CreateCallbackRaw<ICoreWebView2ExecuteScriptCompletedHandler, HRESULT, LPCWSTR>(
+                    [&](HRESULT result, LPCWSTR value) -> HRESULT {
+                        passed = SUCCEEDED(result) && value && std::wstring(value) == L"true";
+                        evaluated = true; return S_OK;
+                    });
+                const auto result = dashboard->ExecuteScript(script, handler);
+                handler->Release();
+                require(SUCCEEDED(result), "execute sidebar regression script");
+                while (!evaluated && GetTickCount64() < deadline) {
+                    MSG message{};
+                    while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&message); DispatchMessageW(&message); }
+                    MsgWaitForMultipleObjects(0, nullptr, FALSE, 10, QS_ALLINPUT);
+                }
+                require(evaluated, "sidebar regression script callback");
+            }
+            require(passed, "sidebar animation, native events, and beta badges");
+        };
+        require(SUCCEEDED(dashboard->ExecuteScript(LR"(
+            document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
+            document.documentElement.dataset.theme = 'dark';
+            window.sidebarRegression = false;
+            (async () => {
+                const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+                const toggle = document.querySelector('.sidebar-toggle');
+                const shell = document.querySelector('.app-shell');
+                const drawer = document.querySelector('#native-preferences-drawer');
+                const nav = document.querySelector('.navigation-secondary');
+                if (shell.classList.contains('is-sidebar-collapsed')) toggle.click();
+                await pause(600);
+                const top = nav.getBoundingClientRect().top;
+                const expanded = drawer.getBoundingClientRect().height;
+                toggle.click();
+                let stable = true;
+                for (let i = 0; i < 15; i++) {
+                    await pause(20);
+                    stable = stable && Math.abs(nav.getBoundingClientRect().top - top) < 1;
+                }
+                window.sidebarCollapsed = drawer.inert && drawer.getBoundingClientRect().height < 1 && expanded > 0;
+                window.sidebarNavStable = stable;
+            })();
+        )", nullptr)), "start sidebar collapse");
+        checkScript(L"Boolean(window.sidebarCollapsed && window.sidebarNavStable)");
+        WebViewWindow::SendMessageToUI(R"({"action":"MONITOR_CHANGED","topology":{"monitors":[{}]}})");
+        WebViewWindow::SendMessageToUI(R"({"action":"SETTINGS_RESULT","success":true,"settings":{"launchAtStartup":false}})");
+        WebViewWindow::SendMessageToUI(R"({"action":"LOADED_BIOMES","biomes":[{"id":"beta-test","name":"Beta card","apps":[]}],"activeId":""})");
+        checkScript(LR"(Boolean(document.querySelector('#native-monitor-count').textContent === '1 display connected' &&
+            !document.querySelector('#native-autostart').checked && document.querySelector('#native-preferences-drawer').inert &&
+            document.querySelector('.brand-beta').textContent === 'BETA' &&
+            document.querySelector('#home-page .card-beta').textContent === 'BETA'))");
+        require(SUCCEEDED(dashboard->ExecuteScript(LR"(
+            document.querySelector('.sidebar-toggle').click();
+            setTimeout(() => {
+                const drawer = document.querySelector('#native-preferences-drawer');
+                const css = getComputedStyle(document.querySelector('.native-preferences'));
+                window.sidebarRegression = !drawer.inert && drawer.getBoundingClientRect().height > 0 && css.opacity === '1';
+            }, 600);
+        )", nullptr)), "expand updated sidebar");
+        checkScript(L"window.sidebarRegression === true");
+        wchar_t screenshotPath[32768]{};
+        if (GetEnvironmentVariableW(L"BIOMES_TEST_SCREENSHOT", screenshotPath, 32768)) {
+            IStream* stream = nullptr;
+            require(SUCCEEDED(CreateStreamOnHGlobal(nullptr, TRUE, &stream)), "screenshot stream");
+            bool captured = false, captureOk = false;
+            auto captureHandler = CreateCallbackRaw<ICoreWebView2CapturePreviewCompletedHandler, HRESULT>(
+                [&](HRESULT result) -> HRESULT { captureOk = SUCCEEDED(result); captured = true; return S_OK; });
+            const auto result = dashboard->CapturePreview(COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG, stream, captureHandler);
+            captureHandler->Release();
+            require(SUCCEEDED(result), "capture dashboard preview");
+            const auto captureDeadline = GetTickCount64() + 5000;
+            while (!captured && GetTickCount64() < captureDeadline) {
+                MSG message{};
+                while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&message); DispatchMessageW(&message); }
+                MsgWaitForMultipleObjects(0, nullptr, FALSE, 10, QS_ALLINPUT);
+            }
+            require(captured && captureOk, "dashboard screenshot completed");
+            HGLOBAL memory = nullptr; GetHGlobalFromStream(stream, &memory);
+            STATSTG stat{}; stream->Stat(&stat, STATFLAG_NONAME);
+            const char* bytes = static_cast<const char*>(GlobalLock(memory));
+            require(bytes != nullptr, "screenshot memory");
+            { std::ofstream output(std::filesystem::path(screenshotPath), std::ios::binary);
+              output.write(bytes, static_cast<std::streamsize>(stat.cbSize.QuadPart));
+              require(output.good(), "write dashboard screenshot"); }
+            GlobalUnlock(memory); stream->Release();
+        }
+        WebViewWindow::HideDashboard();
+        // Terminate only this test's browser process, which uses its unique temporary profile.
+        const auto sentinel = biomes::AppPaths::WebViewData() / L"recovery-preservation-fixture.txt";
+        { std::ofstream output(sentinel); output << "preserve"; }
+        UINT32 browserPid = 0;
+        require(SUCCEEDED(dashboard->get_BrowserProcessId(&browserPid)) && browserPid, "isolated browser PID");
+        const HWND originalHost = WebViewWindow::GetHwnd();
+        const auto oldGeneration = hostGeneration;
+        loadedDashboard = false;
+        dashboard->Release(); viewGuard.value = nullptr; dashboard = nullptr;
+        HANDLE browser = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, browserPid);
+        require(browser != nullptr, "open isolated test browser");
+        const BOOL terminated = TerminateProcess(browser, 17);
+        CloseHandle(browser);
+        require(terminated, "simulate isolated browser crash");
+        const auto recoveryDeadline = GetTickCount64() + 20000;
+        while ((!loadedDashboard || hostGeneration == oldGeneration) && GetTickCount64() < recoveryDeadline) {
+            MSG message{};
+            while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&message); DispatchMessageW(&message); }
+            MsgWaitForMultipleObjects(0, nullptr, FALSE, 10, QS_ALLINPUT);
+        }
+        require(loadedDashboard && hostGeneration > oldGeneration, "ProcessFailed recreates WebView and republishes state");
+        require(WebViewWindow::GetHwnd() == originalHost && !IsWindowVisible(originalHost), "recovery preserves hidden native host");
+        require(std::filesystem::exists(biomes::AppPaths::RuntimeLog()), "crash logged to isolated log");
+        { std::ifstream input(sentinel); std::string value; input >> value; require(value == "preserve", "recovery retains profile files"); }
+        recoveryAttempts = 3; recoveryWindow = GetTickCount64();
+        // Exhaustion is bounded, and shutdown must cancel any future recreation.
+        // Exercise the same path used by ProcessFailed via the native timeout.
+        SendMessageW(originalHost, WM_TIMER, kCreationTimer, 0);
+        require(!recoveryQueued, "recovery retry budget enforced");
         WebViewWindow::Shutdown();
         WebViewWindow::SendMessageToUI("{}");
-        require(!pageReady && !pageReadyCallback && pendingWebMessages.empty(), "shutdown clears readiness and work");
+        require(!recoveryQueued && !pageReady && !pageReadyCallback && pendingWebMessages.empty(), "shutdown clears readiness and work");
         CoUninitialize();
         std::cout << "WebView callback and integration regressions passed\n";
         return 0;

@@ -333,4 +333,19 @@ h1 { margin:0; font:500 24px/1.2 "Fredoka",sans-serif; letter-spacing:-.4px; }
 .native-preferences label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .native-preferences input { accent-color: var(--text-primary); }
 
-.is-sidebar-collapsed .native-preferences { display: none; }
+/* Reserve the drawer footprint so the support navigation never jumps. */
+.native-preferences-slot { height:94px; flex:none; }
+.native-preferences-accordion { display:grid; grid-template-rows:1fr; transition:grid-template-rows 200ms cubic-bezier(.2,.8,.2,1); }
+.native-preferences-clip { min-height:0; overflow:hidden; }
+.native-preferences { width:190px; opacity:1; transform:translateY(0); transition:opacity 200ms cubic-bezier(.2,.8,.2,1),transform 200ms cubic-bezier(.2,.8,.2,1); }
+.is-sidebar-collapsed .native-preferences-accordion { grid-template-rows:0fr; }
+.is-sidebar-collapsed .native-preferences { opacity:0; transform:translateY(-6px); pointer-events:none; }
+.beta-badge { display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; padding:4px 7px; border:1px solid #7773; border-radius:999px; background:#ddd6ff; color:#45306e; font-size:9px; font-weight:600; line-height:1; letter-spacing:.08em; backdrop-filter:blur(8px); white-space:nowrap; }
+[data-theme="dark"] .beta-badge { background:#c5afff20; color:#e4d7ff; border-color:#c5afff40; }
+.brand-logo { width:122px; }
+.brand-beta { position:absolute; left:142px; top:11px; transition:opacity 200ms ease; }
+.is-sidebar-collapsed .brand-beta { opacity:0; }
+.card-beta { position:absolute; top:12px; left:12px; z-index:2; background:#282331d9; color:#f1eaff; border-color:#ffffff30; pointer-events:none; }
+[data-theme="dark"] .card-beta { background:#282331d9; color:#f1eaff; }
+
+@media (max-height:720px) { .sidebar-bottom { padding-top:16px; } }

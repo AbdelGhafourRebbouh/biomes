@@ -28,6 +28,7 @@
                     <img class="brand-logo brand-logo-light" src="logo/logo biomes white.svg" alt="">
                     <img class="brand-mini brand-mini-dark" src="logo/dark logo mi.svg" alt="">
                     <img class="brand-mini brand-mini-light" src="logo/white logo mi.svg" alt="">
+                    <span class="beta-badge brand-beta" aria-label="Version 1.0.0 beta">BETA</span>
                 </a>
             </div>
 
@@ -47,9 +48,15 @@
             </nav>
 
             <div class="sidebar-bottom">
-                <div class="native-preferences">
+                <div class="native-preferences-slot">
+                  <div class="native-preferences-accordion" id="native-preferences-drawer">
+                   <div class="native-preferences-clip">
+                    <div class="native-preferences">
                     <span id="native-monitor-count" role="status">Checking displays...</span>
                     <label><input id="native-autostart" type="checkbox" disabled> Launch at Windows startup</label>
+                    </div>
+                   </div>
+                  </div>
                 </div>
                 <div class="sidebar-divider" aria-hidden="true"></div>
                 <nav class="navigation navigation-secondary" aria-label="Support navigation">
@@ -68,7 +75,7 @@
 
             <section class="biome-grid" id="home-page" aria-label="Saved biomes">
 <article class="biome-card">
-                    <div class="cover cover-lilac" aria-label="Violet mountain landscape placeholder"><span class="cover-sun"></span><span class="cover-ridge ridge-back"></span><span class="cover-ridge ridge-front"></span><button class="run-button" type="button" data-biome="Creative studio">Run biome <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/></svg></button></div>
+                    <div class="cover cover-lilac" aria-label="Violet mountain landscape placeholder"><span class="beta-badge card-beta">BETA</span><span class="cover-sun"></span><span class="cover-ridge ridge-back"></span><span class="cover-ridge ridge-front"></span><button class="run-button" type="button" data-biome="Creative studio">Run biome <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/></svg></button></div>
                     <div class="card-content"><div><h2>Creative studio</h2><p class="hotkey">CTRL + ALT + C</p></div><p class="app-summary">Affinity, Adobe CC, Spotify</p><div class="card-footer"><span class="screen-count"><svg class="map-icon" viewBox="0 0 42 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.2"><rect x="8" y="3" width="26" height="16" rx="2"/><path d="M21 19v3m-6 0h12"/></g></svg><span>1 screen</span></span></div></div>
                 </article>
 
@@ -246,7 +253,7 @@
     </dialog>
     <template id="biome-card-template">
                 <article class="biome-card">
-                    <div class="cover cover-amber" aria-label="Warm mountain landscape placeholder"><span class="cover-sun"></span><span class="cover-ridge ridge-back"></span><span class="cover-ridge ridge-front"></span><button class="run-button" type="button" data-biome="Focus flow">Run biome <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/></svg></button></div>
+                    <div class="cover cover-amber" aria-label="Warm mountain landscape placeholder"><span class="beta-badge card-beta">BETA</span><span class="cover-sun"></span><span class="cover-ridge ridge-back"></span><span class="cover-ridge ridge-front"></span><button class="run-button" type="button" data-biome="Focus flow">Run biome <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/></svg></button></div>
                     <div class="card-content"><div><h2>Focus flow</h2><p class="hotkey">CTRL + ALT + F</p></div><p class="app-summary">VS Code, Obsidian, Chrome</p><div class="card-footer"><span class="screen-count"><svg class="map-icon" viewBox="0 0 42 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.2"><rect x="2" y="4" width="17" height="13" rx="2"/><rect x="23" y="4" width="17" height="13" rx="2"/><path d="M10 17v3m-4 0h8m17-3v3m-4 0h8"/></g></svg><span>2 screens</span></span></div></div>
                 </article>
     </template>

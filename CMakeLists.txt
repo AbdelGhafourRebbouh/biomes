@@ -1,13 +1,23 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(Biomes LANGUAGES CXX RC)
+project(Biomes VERSION 1.0.0 LANGUAGES CXX RC)
+
+# Apply consistently to the application and regression executables.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+include(CheckIPOSupported)
+check_ipo_supported(RESULT BIOMES_IPO_SUPPORTED OUTPUT BIOMES_IPO_ERROR LANGUAGES CXX)
+if(BIOMES_IPO_SUPPORTED)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+else()
+    message(WARNING "Release IPO unavailable: ${BIOMES_IPO_ERROR}")
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_executable(Biomes WIN32
-    resources/biomes.rc
+    resources/resource.rc
     src/main.cpp
     src/core/hotkey_manager.cpp
     src/core/ipc_bridge.cpp
@@ -39,8 +49,11 @@ target_link_libraries(Biomes PRIVATE ole32 user32 shell32 advapi32 gdi32 dwmapi 
 
 # Keep symbols alongside Release builds for local crash-dump diagnosis.
 if(MSVC)
-    target_compile_options(Biomes PRIVATE $<$<CONFIG:Release>:/Zi>)
-    target_link_options(Biomes PRIVATE $<$<CONFIG:Release>:/DEBUG>)
+    target_compile_options(Biomes PRIVATE $<$<AND:$<CONFIG:Release>,$<COMPILE_LANGUAGE:CXX>>:/O2;/Zi>)
+    # The resource file embeds the authoritative manifest; suppress a second one.
+    target_link_options(Biomes PRIVATE /MANIFEST:NO $<$<CONFIG:Release>:/DEBUG;/OPT:REF;/OPT:ICF>)
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(Biomes PRIVATE $<$<AND:$<CONFIG:Release>,$<COMPILE_LANGUAGE:CXX>>:-O3>)
 endif()
 
 option(BIOMES_BUILD_TESTS "Build isolated native stability regression tests" OFF)
@@ -54,7 +67,7 @@ if(BIOMES_BUILD_TESTS)
     target_include_directories(BiomesWebViewTests PRIVATE include include/external/webview2)
     target_link_libraries(BiomesWebViewTests PRIVATE user32 gdi32 dwmapi ole32 shell32)
     add_test(NAME webview_regressions COMMAND BiomesWebViewTests)
-    set_tests_properties(webview_regressions PROPERTIES TIMEOUT 45)
+    set_tests_properties(webview_regressions PROPERTIES TIMEOUT 75)
     add_executable(BiomesLayoutTests tests/layout_tests.cpp src/core/json_manager.cpp
         src/core/monitor_manager.cpp src/core/window_scaler.cpp src/core/app_launcher.cpp
         src/core/app_paths.cpp src/ui/grid_overlay.cpp)

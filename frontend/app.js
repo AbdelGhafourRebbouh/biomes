@@ -48,6 +48,9 @@
     const applySidebarState = (collapsed) => {
         appShell.classList.toggle('is-sidebar-collapsed', collapsed);
         sidebarToggle.setAttribute('aria-expanded', String(!collapsed));
+        const drawer = document.querySelector('#native-preferences-drawer');
+        drawer.inert = collapsed;
+        drawer.setAttribute('aria-hidden', String(collapsed));
         sidebarToggle.setAttribute('aria-label', collapsed ? 'Expand navigation' : 'Collapse navigation');
     };
     applySidebarState(window.innerWidth < 600 || storedSidebarState === 'true');

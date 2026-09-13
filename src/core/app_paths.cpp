@@ -7,6 +7,8 @@
 #include <system_error>
 #include <vector>
 #include <string>
+#include <fstream>
+#include <iomanip>
 
 namespace biomes {
 namespace {
@@ -56,7 +58,19 @@ std::filesystem::path AppPaths::Images() { return Root() / L"images"; }
 std::filesystem::path AppPaths::Backups() { return Root() / L"backups"; }
 std::filesystem::path AppPaths::BiomesFile() { return Config() / L"biomes.json"; }
 std::filesystem::path AppPaths::SettingsFile() { return Config() / L"settings.json"; }
-std::filesystem::path AppPaths::RuntimeLog() { return Logs() / L"biomes_runtime.log"; }
+std::filesystem::path AppPaths::RuntimeLog() { return Logs() / L"biomes.log"; }
+void AppPaths::LogError(const std::string& message) noexcept {
+    try {
+        static std::mutex logMutex;
+        std::lock_guard<std::mutex> guard(logMutex);
+        std::ofstream output(RuntimeLog(), std::ios::app);
+        SYSTEMTIME time{}; GetSystemTime(&time);
+        output << std::setfill('0') << std::setw(4) << time.wYear << '-' << std::setw(2) << time.wMonth
+               << '-' << std::setw(2) << time.wDay << 'T' << std::setw(2) << time.wHour << ':'
+               << std::setw(2) << time.wMinute << ':' << std::setw(2) << time.wSecond << "Z [ERROR] "
+               << message << '\n';
+    } catch (...) { OutputDebugStringA("biomes: could not write isolated runtime log\n"); }
+}
 std::filesystem::path AppPaths::ExecutableDirectory() {
     std::vector<wchar_t> buffer(512);
     for (;;) {

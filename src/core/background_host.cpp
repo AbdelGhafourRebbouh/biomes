@@ -1,5 +1,6 @@
 #include "core/background_host.hpp"
 #include "core/single_instance.hpp"
+#include "core/app_paths.hpp"
 namespace biomes {
 constexpr UINT ExitRequest = WM_APP + 192;
 bool BackgroundHost::Initialize(HINSTANCE instance, const std::wstring& windowClass, bool withTray) {
@@ -15,6 +16,15 @@ bool BackgroundHost::Initialize(HINSTANCE instance, const std::wstring& windowCl
 }
 BackgroundHost::~BackgroundHost() { tray_.Remove(); if (hwnd_) DestroyWindow(hwnd_); }
 void BackgroundHost::RequestExit() { if (hwnd_) PostMessageW(hwnd_, ExitRequest, 0, 0); }
+void BackgroundHost::NotifyDisplayChange() {
+    if (stopping_ || displayQueued_) return;
+    displayQueued_ = true;
+    pending_.push_back([this] {
+        displayQueued_ = false;
+        if (displayChanged) displayChanged();
+    });
+    PostMessageW(hwnd_, WM_NULL, 0, 0);
+}
 LRESULT CALLBACK BackgroundHost::Proc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
     auto self = reinterpret_cast<BackgroundHost*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     if (message == WM_NCCREATE) {
@@ -35,9 +45,8 @@ LRESULT CALLBACK BackgroundHost::Proc(HWND hwnd, UINT message, WPARAM wp, LPARAM
     if (message == WM_HOTKEY) {
         self->pending_.push_back([self,wp] { if (self->hotkey) self->hotkey(static_cast<int>(wp)); }); return 0;
     }
-    if (message == WM_DISPLAYCHANGE || (message == WM_SETTINGCHANGE && wp == SPI_SETWORKAREA)) {
-        self->pending_.push_back([self] { if (self->displayChanged) self->displayChanged(); });
-        PostMessageW(hwnd, WM_NULL, 0, 0); return 0;
+    if (message == WM_DISPLAYCHANGE || message == WM_DPICHANGED || (message == WM_SETTINGCHANGE && wp == SPI_SETWORKAREA)) {
+        self->NotifyDisplayChange(); return 0;
     }
     if (self->taskbarCreated_ && message == self->taskbarCreated_ && self->withTray_) {
         if (!self->tray_.Add(hwnd)) self->pending_.push_back([self] { if (self->open) self->open(); });
@@ -66,11 +75,11 @@ int BackgroundHost::Run() {
         // Execute outside Win32/COM callbacks, never inside a nested message pump.
         while (!stopping_ && !pending_.empty()) {
             auto action = std::move(pending_.front()); pending_.pop_front();
-            try { action(); } catch (...) { MessageBoxW(nullptr,L"biomes could not complete the background action.",L"biomes",MB_OK | MB_ICONERROR); }
+            try { action(); } catch (...) { AppPaths::LogError("Background action failed"); MessageBoxW(nullptr,L"biomes could not complete the background action.",L"biomes",MB_OK | MB_ICONERROR); }
         }
     }
     stopping_ = true; pending_.clear();
-    try { if (shutdown) shutdown(); } catch (...) { result = 1; }
+    try { if (shutdown) shutdown(); } catch (...) { AppPaths::LogError("Background shutdown failed"); result = 1; }
     tray_.Remove();
     if (hwnd_) DestroyWindow(hwnd_);
     return result;

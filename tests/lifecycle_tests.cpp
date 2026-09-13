@@ -65,6 +65,11 @@ int main(int argc, char** argv) {
         Require(host.Initialize(GetModuleHandleW(nullptr),primary.WindowClass(),false),"hidden host created");
         Require(!IsWindowVisible(host.Hwnd()),"no UI flash");
         int opened=0, hotkeys=0, stopped=0;
+        int displayEvents = 0;
+        host.displayChanged = [&] { ++displayEvents; };
+        SendMessageW(host.Hwnd(), WM_DISPLAYCHANGE, 0, 0);
+        SendMessageW(host.Hwnd(), WM_DPICHANGED, 0, 0);
+        Require(displayEvents == 0, "display callbacks deferred outside window procedure");
         host.open=[&] { ++opened; PostMessageW(host.Hwnd(),WM_HOTKEY,77,0); };
         host.hotkey=[&](int id) { Require(id==77,"host hotkey id"); ++hotkeys; host.RequestExit(); };
         host.shutdown=[&] { ++stopped; };
@@ -83,6 +88,7 @@ int main(int argc, char** argv) {
         Require(host.Run()==0,"message loop exited");
         sender.join();
         Require(handedOff && opened==1 && hotkeys==1 && stopped==1,"handoff hotkeys and shutdown");
+        Require(displayEvents == 1, "display and DPI notifications coalesced");
         Require(!host.Hwnd(),"host destroyed on exit");
         Require(duplicate.ActivateExisting(true),"duplicate autostart exits silently");
         RegDeleteTreeW(HKEY_CURRENT_USER,key.c_str());

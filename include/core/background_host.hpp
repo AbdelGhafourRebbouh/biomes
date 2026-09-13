@@ -15,6 +15,7 @@ public:
     bool CanHide() const { return tray_.Available(); }
     bool Stopping() const { return stopping_; }
     void RequestExit();
+    void NotifyDisplayChange();
     int Run();
     ~BackgroundHost();
 private:
@@ -22,6 +23,7 @@ private:
     TrayManager tray_;
     UINT taskbarCreated_ = 0;
     bool stopping_ = false, withTray_ = true;
+    bool displayQueued_ = false;
     std::deque<std::function<void()>> pending_;
     static LRESULT CALLBACK Proc(HWND, UINT, WPARAM, LPARAM);
 };

@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <windows.h>
 #include <cmath>
+#include "core/app_paths.hpp"
 #include <stdexcept>
 #include "../../include/core/window_scaler.hpp"
 
@@ -161,74 +162,90 @@ void EnrichBoxMonitorFields(SelectedBox& box, const std::vector<MonitorDetail>& 
 
 bool JsonManager::SaveBiomesToFile(const std::filesystem::path& filePath, const std::vector<BiomeProfile>& profiles) {
     try {
-    json root;
-    root["version"] = 3;
-    root["biomes"] = json::array();
-    for (const auto& profile : profiles) {
-        root["biomes"].push_back(SerializeBiome(profile));
-    }
+        json root;
+        root["version"] = 3;
+        root["biomes"] = json::array();
+        for (const auto& profile : profiles) {
+            root["biomes"].push_back(SerializeBiome(profile));
+        }
 
-    const std::filesystem::path target(filePath);
-    std::filesystem::path temporary = target;
-    temporary += L".tmp";
-    if (!target.parent_path().empty()) {
-        std::error_code directoryError;
-        std::filesystem::create_directories(target.parent_path(), directoryError);
-        if (directoryError) return false;
-    }
+        const std::filesystem::path target(filePath);
+        std::filesystem::path temporary = target;
+        temporary += L".tmp";
+        if (!target.parent_path().empty()) {
+            std::error_code directoryError;
+            std::filesystem::create_directories(target.parent_path(), directoryError);
+            if (directoryError) { biomes::AppPaths::LogError("Layout file operation failed"); return false; }
+        }
 
-    const std::string bytes = root.dump(4);
-    // Serialize writers before touching the shared staging file.
-    auto lockPath = target; lockPath += L".lock";
-    HANDLE lock = CreateFileW(lockPath.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
-                              OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (lock == INVALID_HANDLE_VALUE) return false;
-    struct HandleGuard { HANDLE h; ~HandleGuard() { CloseHandle(h); } } lockGuard{lock};
-    HANDLE output = CreateFileW(temporary.c_str(), GENERIC_WRITE, 0, nullptr,
-                                CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (output == INVALID_HANDLE_VALUE) return false;
-    DWORD written = 0;
-    const bool saved = bytes.size() <= MAXDWORD &&
-        WriteFile(output, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr) &&
-        written == bytes.size() && FlushFileBuffers(output);
-    const bool closed = CloseHandle(output) != FALSE;
-    if (!saved || !closed) return false;
-    if (!MoveFileExW(temporary.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
-        return false;
-    return true;
-    } catch (const std::exception&) { return false; }
+        const std::string bytes = root.dump(4);
+        if (bytes.size() > 64 * 1024 * 1024) throw std::runtime_error("Layout exceeds 64 MiB");
+        // Serialize writers before touching the shared staging file.
+        auto lockPath = target; lockPath += L".lock";
+        HANDLE lock = CreateFileW(lockPath.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
+                                  OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (lock == INVALID_HANDLE_VALUE) { biomes::AppPaths::LogError("Layout writer lock failed: " + std::to_string(GetLastError())); return false; }
+        struct HandleGuard { HANDLE h; ~HandleGuard() { CloseHandle(h); } } lockGuard{lock};
+        HANDLE output = CreateFileW(temporary.c_str(), GENERIC_WRITE, 0, nullptr,
+                                    CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (output == INVALID_HANDLE_VALUE) { biomes::AppPaths::LogError("Layout staging open failed: " + std::to_string(GetLastError())); return false; }
+        DWORD written = 0;
+        const bool saved = bytes.size() <= MAXDWORD &&
+            WriteFile(output, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr) &&
+            written == bytes.size() && FlushFileBuffers(output);
+        const bool closed = CloseHandle(output) != FALSE;
+        if (!saved || !closed) { biomes::AppPaths::LogError("Layout staging write/flush failed: " + std::to_string(GetLastError())); return false; }
+        if (!MoveFileExW(temporary.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+            { biomes::AppPaths::LogError("Layout replacement failed: " + std::to_string(GetLastError())); return false; }
+        return true;
+    } catch (const std::exception& error) { biomes::AppPaths::LogError(std::string("Layout save: ") + error.what()); return false; }
 }
 
 bool JsonManager::LoadBiomesFromFile(const std::filesystem::path& filePath, std::vector<BiomeProfile>& outProfiles) {
     std::vector<BiomeProfile> loaded;
-    std::ifstream file(filePath);
-    if (!file.is_open()) {
-        std::error_code error;
-        const bool exists = std::filesystem::exists(filePath, error);
-        if (!exists && !error) { outProfiles.clear(); return true; }
-        return false;
-    }
-
     try {
-        json root;
-        file >> root;
+        std::error_code sizeError;
+        if (std::filesystem::exists(filePath, sizeError)) {
+            const auto size = std::filesystem::file_size(filePath, sizeError);
+            if (sizeError || size > 64 * 1024 * 1024) {
+                biomes::AppPaths::LogError("Layout file is inaccessible or exceeds 64 MiB"); return false;
+            }
+        }
+        std::ifstream file(filePath, std::ios::binary);
+        if (!file.is_open()) {
+            std::error_code error;
+            const bool exists = std::filesystem::exists(filePath, error);
+            if (!exists && !error) { outProfiles.clear(); return true; }
+            { biomes::AppPaths::LogError("Layout file operation failed"); return false; }
+        }
+
+        // Bound the actual read as well as the initial size check, in case a
+        // non-Biomes writer grows the file while it is being read.
+        std::string contents;
+        char chunk[65536];
+        while (file) {
+            file.read(chunk, sizeof(chunk));
+            const auto count = static_cast<size_t>(file.gcount());
+            if (contents.size() + count > 64 * 1024 * 1024) throw std::runtime_error("Layout exceeds 64 MiB");
+            contents.append(chunk, count);
+        }
+        if (!file.eof() || file.bad()) throw std::runtime_error("Incomplete layout read");
+        const json root = json::parse(contents);
         if (!root.is_object() || (root.contains("version") &&
             (!root["version"].is_number_integer() || root["version"] < 1 || root["version"] > 3)))
-            return false;
+            { biomes::AppPaths::LogError("Layout file operation failed"); return false; }
         if (!root.contains("biomes") || !root["biomes"].is_array()) {
             std::cerr << "[JSON] Invalid Biomes collection in " << filePath << std::endl;
-            return false;
+            { biomes::AppPaths::LogError("Layout file operation failed"); return false; }
         }
         for (const auto& item : root["biomes"]) {
             loaded.push_back(DeserializeBiome(item));
         }
+        outProfiles = std::move(loaded);
+        return true;
     } catch (const std::exception& error) {
-        std::cerr << "[JSON] Failed to parse " << filePath << ": " << error.what() << std::endl;
-        return false;
+        biomes::AppPaths::LogError(std::string("Layout read: ") + error.what()); return false;
     }
-
-    outProfiles = std::move(loaded);
-    return true;
 }
 
 std::string JsonManager::LoadBiomesAsJsonString(const std::filesystem::path& filePath) {

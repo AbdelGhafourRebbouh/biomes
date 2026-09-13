@@ -73,6 +73,18 @@ int main() {
         require(profile.layout[0].stableMonitorId == "disconnected-fixture", "enrichment cannot remap missing monitor");
         profile.layoutVariants[MonitorManager::GetCurrentTopologyHash()] = {};
         require(JsonManager::SelectLayoutForTopology(profile).empty(), "empty topology variant remains authoritative");
+        auto resized = right; resized.rcWork = {0, 0, 1280, 700};
+        auto recalculated = GridOverlay::RecalculateBoxes(boxes, {left, resized});
+        require(recalculated[0].pixelRect.right == 400 && recalculated[0].pixelRect.bottom == 450,
+                "overlay relative bounds recalculate after resolution change");
+        auto absent = GridOverlay::RecalculateBoxes(boxes, {left});
+        require(absent[0].monitorIndex == -1 && absent[0].stableMonitorId == "right", "disconnected draft zone retained without index remap");
+        auto reconnected = GridOverlay::RecalculateBoxes(absent, {left, resized});
+        require(reconnected[0].monitorIndex == 1, "reconnected draft zone restored");
+        { std::ofstream output(path); output << original << " trailing corruption"; }
+        require(!JsonManager::LoadBiomesFromFile(path, loaded) && loaded[0].id == "fixture", "trailing corrupt JSON rejected without partial state");
+        require(biomes::AppPaths::RuntimeLog().filename() == L"biomes.log", "isolated error log filename");
+        require(std::filesystem::exists(biomes::AppPaths::RuntimeLog()), "layout failure logged");
         require(!GridOverlay::ShowOverlay(0, 14), "invalid overlay rows rejected");
         require(!GridOverlay::ShowOverlay(8, 129), "excessive overlay columns rejected");
         require(!GridOverlay::StartSnapping() && !GridOverlay::IsVisible(), "hidden overlay cannot snap");

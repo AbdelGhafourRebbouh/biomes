@@ -1062,18 +1062,20 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     background.displayChanged = []() {
         WriteRuntimeLog("[APP] Display or work-area change detected");
-        if (GridOverlay::IsVisible()) {
-            GridOverlay::HideOverlay();
+        if (!GridOverlay::RefreshDisplays()) {
+            biomes::AppPaths::LogError("Could not rebuild overlay after display change");
             WebViewWindow::RestoreDashboard();
-            WebViewWindow::SendMessageToUI(R"({"action":"STATUS","payload":"Displays changed. Reopen the grid overlay to use the current work areas."})");
         }
         SendMonitorsChangedToUi();
     };
+    WebViewWindow::SetDisplayChangedCallback([] { if (g_background) g_background->NotifyDisplayChange(); });
+    GridOverlay::SetDisplayChangedCallback([] { if (g_background) g_background->NotifyDisplayChange(); });
     SendMonitorsChangedToUi();
 
     LaunchPanel::Initialize(background.Hwnd());
     WindowScaler::SetLaunchProgressCallback([](const std::string& progress) { LaunchPanel::Update(progress); });
     background.shutdown = [&] {
+        GridOverlay::SetDisplayChangedCallback({});
         GridOverlay::SetCompletedCallback({}); GridOverlay::SetCancelledCallback({});
         WindowScaler::SetLaunchProgressCallback({});
         WindowScaler::CancelPendingLaunches();

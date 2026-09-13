@@ -18,6 +18,12 @@
 namespace {
 constexpr UINT kDispatchWebMessage = WM_APP + 71;
 constexpr UINT kPageReady = WM_APP + 72;
+constexpr UINT_PTR kRecoveryTimer = 0xB105;
+constexpr UINT_PTR kCreationTimer = 0xB106;
+bool recoveryQueued = false;
+unsigned recoveryAttempts = 0;
+ULONGLONG recoveryWindow = 0;
+EventRegistrationToken failedToken{};
 std::function<void()> pageReadyCallback;
 bool pageReady = false;
 EventRegistrationToken messageToken{}, navigationToken{}, completedToken{};
@@ -70,7 +76,7 @@ public:
         return remaining;
     }
     HRESULT STDMETHODCALLTYPE Invoke(Args... args) override {
-        try { return callback_(args...); } catch (...) { return E_FAIL; }
+        try { return callback_(args...); } catch (...) { biomes::AppPaths::LogError("Exception at WebView COM boundary"); return E_FAIL; }
     }
 };
 
@@ -136,34 +142,66 @@ bool WebViewWindow::Initialize(HINSTANCE hInstance, int nCmdShow, const std::str
     return true;
 }
 
+void WebViewWindow::ReleaseWebView() {
+    ++hostGeneration; pageReady = false; pendingWebMessages.clear();
+    if (s_hwnd) KillTimer(s_hwnd, kCreationTimer);
+    if (s_webview) {
+        s_webview->remove_WebMessageReceived(messageToken);
+        s_webview->remove_NavigationStarting(navigationToken);
+        s_webview->remove_NavigationCompleted(completedToken);
+        s_webview->remove_ProcessFailed(failedToken);
+    }
+    if (s_controller) s_controller->Close();
+    if (s_webview) { s_webview->Release(); s_webview = nullptr; }
+    if (s_controller) { s_controller->Release(); s_controller = nullptr; }
+    messageToken = {}; navigationToken = {}; completedToken = {}; failedToken = {};
+}
+
+void WebViewWindow::ScheduleRecovery() {
+    if (shuttingDown || !s_hwnd || recoveryQueued) return;
+    pageReady = false; pendingWebMessages.clear();
+    KillTimer(s_hwnd, kCreationTimer);
+    const auto now = GetTickCount64();
+    if (!recoveryWindow || now - recoveryWindow >= 60000) { recoveryWindow = now; recoveryAttempts = 0; }
+    if (recoveryAttempts >= 3) {
+        biomes::AppPaths::LogError("WebView recovery stopped after three attempts in one minute; engine remains active");
+        return;
+    }
+    const UINT delays[] = {250, 1000, 3000};
+    recoveryQueued = SetTimer(s_hwnd, kRecoveryTimer, delays[recoveryAttempts++], nullptr) != 0;
+    biomes::AppPaths::LogError("WebView recovery scheduled; preserving browser profile");
+}
+
 void WebViewWindow::InitWebView(const std::string&) {
+    if (shuttingDown || !s_hwnd) return;
+    SetTimer(s_hwnd, kCreationTimer, 20000, nullptr);
     if (!loaderModule) loaderModule = LoadLibraryW((biomes::AppPaths::ExecutableDirectory() / L"WebView2Loader.dll").c_str());
-    if (!loaderModule) { std::cerr << "[WEBVIEW] Loader unavailable" << std::endl; return; }
+    if (!loaderModule) { biomes::AppPaths::LogError("WebView loader unavailable"); ScheduleRecovery(); return; }
     const auto create = reinterpret_cast<PFN_CreateCoreWebView2EnvironmentWithOptions>(
         GetProcAddress(loaderModule, "CreateCoreWebView2EnvironmentWithOptions"));
-    if (!create) return;
+    if (!create) { biomes::AppPaths::LogError("WebView environment factory unavailable"); ScheduleRecovery(); return; }
     const auto generation = hostGeneration;
     auto environmentHandler = CreateCallbackRaw<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler,
         HRESULT, ICoreWebView2Environment*>([generation](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
         if (shuttingDown || !s_hwnd || generation != hostGeneration) return S_OK;
-        if (FAILED(result) || !env) return FAILED(result) ? result : E_FAIL;
+        if (FAILED(result) || !env) { biomes::AppPaths::LogError("WebView environment creation failed"); ScheduleRecovery(); return E_FAIL; }
         auto controllerHandler = CreateCallbackRaw<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler,
             HRESULT, ICoreWebView2Controller*>([generation](HRESULT result, ICoreWebView2Controller* controller) -> HRESULT {
             if (shuttingDown || !s_hwnd || generation != hostGeneration) {
                 if (controller) controller->Close(); return S_OK;
             }
-            if (FAILED(result) || !controller) return FAILED(result) ? result : E_FAIL;
+            if (FAILED(result) || !controller) { biomes::AppPaths::LogError("WebView controller creation failed"); ScheduleRecovery(); return E_FAIL; }
             s_controller = controller; s_controller->AddRef();
             if (FAILED(controller->get_CoreWebView2(&s_webview)) || !s_webview) {
-                controller->Close(); s_controller->Release(); s_controller = nullptr; return E_FAIL;
+                controller->Close(); s_controller->Release(); s_controller = nullptr; ScheduleRecovery(); return E_FAIL;
             }
             RECT bounds{}; GetClientRect(s_hwnd, &bounds);
             controller->put_Bounds(bounds);
             controller->put_IsVisible(IsWindowVisible(s_hwnd) && !IsIconic(s_hwnd));
             auto received = CreateCallbackRaw<ICoreWebView2WebMessageReceivedEventHandler,
                 ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs*>(
-                [](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
-                    if (shuttingDown) return S_OK;
+                [generation](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
+                    if (shuttingDown || generation != hostGeneration) return S_OK;
                     LPWSTR source = nullptr;
                     if (FAILED(args->get_Source(&source)) || !source) return S_OK;
                     std::wstring origin(source); CoTaskMemFree(source);
@@ -187,7 +225,8 @@ void WebViewWindow::InitWebView(const std::string&) {
             received->Release();
             auto navigating = CreateCallbackRaw<ICoreWebView2NavigationStartingEventHandler,
                 ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs*>(
-                [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs* args) -> HRESULT {
+                [generation](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs* args) -> HRESULT {
+                    if (shuttingDown || generation != hostGeneration) return S_OK;
                     LPWSTR uri = nullptr;
                     if (FAILED(args->get_Uri(&uri)) || !uri) { args->put_Cancel(TRUE); return S_OK; }
                     std::wstring url(uri); CoTaskMemFree(uri);
@@ -200,23 +239,45 @@ void WebViewWindow::InitWebView(const std::string&) {
             navigating->Release();
             auto completed = CreateCallbackRaw<ICoreWebView2NavigationCompletedEventHandler,
                 ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*>(
-                [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT {
+                [generation](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT {
+                    if (shuttingDown || generation != hostGeneration) return S_OK;
                     BOOL success = FALSE; args->get_IsSuccess(&success);
-                    if (!shuttingDown && success) PostMessage(s_hwnd, kPageReady, 0, 0);
+                    if (success) PostMessage(s_hwnd, kPageReady, static_cast<WPARAM>(generation), 0);
+                    else ScheduleRecovery();
                     return S_OK;
                 });
             const HRESULT completedResult = s_webview->add_NavigationCompleted(completed, &completedToken);
             completed->Release();
-            if (FAILED(messageResult) || FAILED(navigationResult) || FAILED(completedResult)) return E_FAIL;
-            return s_webview->Navigate(trustedPage.c_str());
+            auto failed = CreateCallbackRaw<ICoreWebView2ProcessFailedEventHandler,
+                ICoreWebView2*, ICoreWebView2ProcessFailedEventArgs*>(
+                [generation](ICoreWebView2*, ICoreWebView2ProcessFailedEventArgs* args) -> HRESULT {
+                    if (shuttingDown || generation != hostGeneration) return S_OK;
+                    COREWEBVIEW2_PROCESS_FAILED_KIND kind;
+                    if (FAILED(args->get_ProcessFailedKind(&kind))) return S_OK;
+                    biomes::AppPaths::LogError("WebView ProcessFailed kind=" + std::to_string(static_cast<int>(kind)));
+                    if (kind == COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED ||
+                        kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED ||
+                        kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE)
+                        ScheduleRecovery();
+                    return S_OK;
+                });
+            const HRESULT failedResult = s_webview->add_ProcessFailed(failed, &failedToken);
+            failed->Release();
+            if (FAILED(messageResult) || FAILED(navigationResult) || FAILED(completedResult) || FAILED(failedResult)) {
+                ScheduleRecovery(); return E_FAIL;
+            }
+            const HRESULT navigation = s_webview->Navigate(trustedPage.c_str());
+            if (FAILED(navigation)) ScheduleRecovery();
+            return navigation;
         });
         const HRESULT resultController = env->CreateCoreWebView2Controller(s_hwnd, controllerHandler);
         controllerHandler->Release();
+        if (FAILED(resultController)) ScheduleRecovery();
         return resultController;
     });
     const HRESULT result = create(nullptr, biomes::AppPaths::WebViewData().c_str(), nullptr, environmentHandler);
     environmentHandler->Release();
-    if (FAILED(result)) std::cerr << "[WEBVIEW] Environment creation failed: " << result << std::endl;
+    if (FAILED(result)) { biomes::AppPaths::LogError("WebView environment request failed: " + std::to_string(result)); ScheduleRecovery(); }
 }
 
 void WebViewWindow::SendMessageToUI(const std::string& jsonPayload) {
@@ -227,7 +288,7 @@ void WebViewWindow::SendMessageToUI(const std::string& jsonPayload) {
     std::wstring payload(count, '\0');
     MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, jsonPayload.data(), static_cast<int>(jsonPayload.size()), payload.data(), count);
     const HRESULT result = s_webview->PostWebMessageAsJson(payload.c_str());
-    if (FAILED(result)) std::cerr << "[IPC] PostWebMessageAsJson failed: " << result << std::endl;
+    if (FAILED(result)) biomes::AppPaths::LogError("PostWebMessageAsJson failed: " + std::to_string(result));
 }
 
 HWND WebViewWindow::GetSnapTarget() {
@@ -264,8 +325,17 @@ void WebViewWindow::RunMessageLoop() {
 
 LRESULT CALLBACK WebViewWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
+        case WM_TIMER:
+            if (wParam == kRecoveryTimer) {
+                KillTimer(hwnd, kRecoveryTimer); recoveryQueued = false;
+                if (!shuttingDown) { ReleaseWebView(); InitWebView(""); }
+                return 0;
+            }
+            if (wParam == kCreationTimer) { ScheduleRecovery(); return 0; }
+            break;
         case kPageReady:
-            if (!shuttingDown && s_webview) {
+            if (!shuttingDown && s_webview && wParam == hostGeneration && !recoveryQueued) {
+                KillTimer(hwnd, kCreationTimer);
                 pageReady = true;
                 try { if (pageReadyCallback) pageReadyCallback(); } catch (...) {}
                 if (!pendingWebMessages.empty()) PostMessage(hwnd, kDispatchWebMessage, 0, 0);
@@ -280,8 +350,8 @@ LRESULT CALLBACK WebViewWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
             pendingWebMessages.pop_front();
             dispatchingWebMessage = true;
             try { if (s_onMessageReceived) s_onMessageReceived(message); }
-            catch (const std::exception& error) { std::cerr << "[IPC] " << error.what() << std::endl; }
-            catch (...) { std::cerr << "[IPC] Unexpected native handler exception" << std::endl; }
+            catch (const std::exception& error) { biomes::AppPaths::LogError(std::string("IPC dispatch: ") + error.what()); }
+            catch (...) { biomes::AppPaths::LogError("Unexpected IPC dispatch exception"); }
             dispatchingWebMessage = false;
             if (!pendingWebMessages.empty()) PostMessage(hwnd, kDispatchWebMessage, 0, 0);
             return 0;
@@ -324,6 +394,7 @@ LRESULT CALLBACK WebViewWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
             SetWindowPos(hwnd, nullptr, rect->left, rect->top,
                          rect->right - rect->left, rect->bottom - rect->top,
                          SWP_NOZORDER | SWP_NOACTIVATE);
+            if (s_onDisplayChanged) s_onDisplayChanged();
             return 0;
         }
         case WM_HOTKEY:
@@ -366,16 +437,8 @@ LRESULT CALLBACK WebViewWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
             }
             break;
         case WM_DESTROY:
-            ++hostGeneration; pageReady = false;
-            pendingWebMessages.clear();
-            if (s_webview) {
-                s_webview->remove_WebMessageReceived(messageToken);
-                s_webview->remove_NavigationStarting(navigationToken);
-                s_webview->remove_NavigationCompleted(completedToken);
-            }
-            if (s_controller) s_controller->Close();
-            if (s_webview) { s_webview->Release(); s_webview = nullptr; }
-            if (s_controller) { s_controller->Release(); s_controller = nullptr; }
+            KillTimer(hwnd, kRecoveryTimer); recoveryQueued = false;
+            ReleaseWebView();
             s_hwnd = nullptr;
             break;
         default:
@@ -389,6 +452,7 @@ void WebViewWindow::RestoreDashboard() {
     if (!s_hwnd && showRequested) { showRequested(); return; }
     if (!s_hwnd || !IsWindow(s_hwnd)) return;
 
+    if (!pageReady && !recoveryQueued && recoveryAttempts >= 3) ScheduleRecovery();
     RememberAppWindow(GetForegroundWindow());
     EnableWindow(s_hwnd, TRUE);
 
@@ -421,6 +485,9 @@ void WebViewWindow::SetShowRequestedCallback(std::function<void()> callback) { s
 void WebViewWindow::SetCloseRequestedCallback(std::function<void()> callback) { closeRequested = std::move(callback); }
 void WebViewWindow::Shutdown() {
     shuttingDown = true;
+    if (s_hwnd) { KillTimer(s_hwnd, kRecoveryTimer); KillTimer(s_hwnd, kCreationTimer); }
+    recoveryQueued = false;
+    s_onDisplayChanged = {};
     showRequested = {}; closeRequested = {};
     s_onMessageReceived = {};
     pageReadyCallback = {}; pageReady = false;

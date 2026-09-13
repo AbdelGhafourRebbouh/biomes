@@ -1,0 +1,34 @@
+#include <windows.h>
+#include "resource.h"
+
+IDI_BIOMES ICON "biomes.ico"
+1 RT_MANIFEST "app.manifest"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,0,0,0
+ PRODUCTVERSION 1,0,0,0
+ FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+ FILEFLAGS VS_FF_PRERELEASE
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE 0
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "Biomes"
+            VALUE "FileDescription", "Biomes"
+            VALUE "FileVersion", "1.0.0-beta"
+            VALUE "InternalName", "Biomes"
+            VALUE "LegalCopyright", "Copyright (C) 2026 Abdelghafour Rebbouh"
+            VALUE "OriginalFilename", "Biomes.exe"
+            VALUE "ProductName", "Biomes"
+            VALUE "ProductVersion", "1.0.0-beta"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END

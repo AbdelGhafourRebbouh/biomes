@@ -59,6 +59,8 @@ private:
 
     static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
     static void InitWebView(const std::string& startUrl);
+    static void ReleaseWebView();
+    static void ScheduleRecovery();
 };
 
 #endif // WEBVIEW_WINDOW_HPP
