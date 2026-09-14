@@ -218,6 +218,11 @@ New Chrome windows use Chrome's last-used profile; per-zone browser account and 
 ## ☕ Community support & funding
 
 biomes is independently built by [Abdelghafour Rebbouh](https://github.com/AbdelGhafourRebbouh). If it saves you time or helps you start your work, you can [support development on Ko-fi](https://ko-fi.com/abdelghafourrebbouh).
+<p align="left">
+  <a href="https://ko-fi.com/abdelghafourrebbouh">
+    <img src="https://img.shields.io/badge/Support_on-Ko--fi-FF5E5B?style=for-the-badge&logo=kofi&logoColor=white" alt="Support on Ko-fi">
+  </a>
+</p>
 
 Funding priorities:
 
