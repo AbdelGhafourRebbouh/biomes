@@ -118,6 +118,15 @@ AI helps me explore those problems and iterate on possible fixes. The design dir
 
 **v1.0.0-beta is being prepared for publication. A GitHub release has not been published yet.**
 
+<p align="left">
+  <a href="https://github.com/AbdelGhafourRebbouh/biomes/releases/download/v1.0.0-beta/biomesSetup-v1.0.0-beta.exe">
+    <img src="https://img.shields.io/badge/Download-v1.0.0--beta%20Installer-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download Installer">
+  </a>
+  <a href="https://github.com/AbdelGhafourRebbouh/biomes/releases">
+    <img src="https://img.shields.io/badge/GitHub-View%20Releases-2ea44f?style=for-the-badge&logo=github&logoColor=white" alt="View Releases">
+  </a>
+</p>
+
 - [Release page](https://github.com/AbdelGhafourRebbouh/biomes/releases)
 - [Planned direct installer link](https://github.com/AbdelGhafourRebbouh/biomes/releases/download/v1.0.0-beta/biomesSetup-v1.0.0-beta.exe) — available after the `v1.0.0-beta` release and its installer asset are uploaded.
 
