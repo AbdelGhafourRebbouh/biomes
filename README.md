@@ -210,7 +210,7 @@ Generated builds, temporary browser profiles, and distribution binaries are excl
 
 - [x] Windows workspace layouts, multi-monitor grids, tray lifetime, and global hotkeys.
 - [x] Local persistence, launch progress, UI recovery, and per-user beta installer.
-- [ ] Publish v1.0.0-beta and improve compatibility from real-world feedback.
+- [x] Publish v1.0.0-beta and improve compatibility from real-world feedback.
 - [ ] Fund Windows code signing.
 - [ ] Continue accessibility, display-scaling, and application-compatibility improvements.
 - [ ] Explore a macOS version using WKWebView and native window-management APIs.
