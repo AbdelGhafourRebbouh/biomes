@@ -16,6 +16,6 @@ svg.set("height", "1024")
 document = pymupdf.open(stream=ET.tostring(svg), filetype="svg")
 pixmap = document[0].get_pixmap(alpha=True)
 image = Image.frombytes("RGBA", (pixmap.width, pixmap.height), pixmap.samples)
-destination = root / "frontend/icons/biomes.ico"
+destination = root / "resources/biomes.ico"
 image.save(destination, format="ICO", sizes=[(s, s) for s in (16, 20, 24, 32, 40, 48, 64, 128, 256)])
 print(destination)

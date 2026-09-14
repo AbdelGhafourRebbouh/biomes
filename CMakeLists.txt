@@ -40,7 +40,6 @@ add_executable(Biomes WIN32
 
 target_include_directories(Biomes PRIVATE
     resources
-    frontend/icons
     include
     include/external/webview2
 )

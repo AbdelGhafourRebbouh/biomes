@@ -48,9 +48,6 @@
     const applySidebarState = (collapsed) => {
         appShell.classList.toggle('is-sidebar-collapsed', collapsed);
         sidebarToggle.setAttribute('aria-expanded', String(!collapsed));
-        const drawer = document.querySelector('#native-preferences-drawer');
-        drawer.inert = collapsed;
-        drawer.setAttribute('aria-hidden', String(collapsed));
         sidebarToggle.setAttribute('aria-label', collapsed ? 'Expand navigation' : 'Collapse navigation');
     };
     applySidebarState(window.innerWidth < 600 || storedSidebarState === 'true');
@@ -108,7 +105,8 @@
         const isEmpty = loaded && profiles.length === 0;
         homePage.hidden = Boolean(details) || isEmpty || !loaded;
         emptyPage.hidden = Boolean(details) || !isEmpty || !loaded;
-        comingPage.hidden = !details || page === 'developer' || page === 'feedback';
+        comingPage.hidden = !details || page === 'developer' || page === 'feedback' || page === 'customization';
+        document.querySelector('#settings-page').hidden = page !== 'customization';
         developerPage.hidden = page !== 'developer';
         feedbackPage.hidden = page !== 'feedback';
         loadingPage.hidden = Boolean(details) || loaded;
@@ -118,7 +116,7 @@
         accent.textContent = details ? details.accent : 'biomes';
         const title = details ? details.title : 'Your biomes';
         heading.replaceChildren(title.slice(0, -accent.textContent.length), accent);
-        if (details && page !== 'developer' && page !== 'feedback') {
+        if (details && page !== 'developer' && page !== 'feedback' && page !== 'customization') {
             const bannerImage = document.querySelector('#coming-page .coming-banner img');
             bannerImage.src = page === 'privacy' ? 'images/image for the banner.jpg' : 'assets/coming-later.png';
             bannerImage.classList.toggle('soft-banner-image', page === 'privacy');
@@ -133,10 +131,10 @@
                 bannerAccent.textContent = details.banner.slice(split + 1);
                 document.querySelector('#coming-title').replaceChildren(details.banner.slice(0, split + 1), bannerAccent);
             }
-            document.querySelector('.coming-kicker').textContent = details.beforeRelease
+            document.querySelector('#coming-page .coming-kicker').textContent = details.beforeRelease
                 ? 'Planned before launch'
                 : details.badge || 'A little more biomes, on the way';
-            document.querySelector('.coming-kicker').classList.toggle('privacy-badge', page === 'privacy');
+            document.querySelector('#coming-page .coming-kicker').classList.toggle('privacy-badge', page === 'privacy');
         }
         document.querySelectorAll('.nav-link').forEach((link) => {
             const selected = link.hash === '#' + page;
@@ -354,7 +352,16 @@
     let confirmedStartup = false;
     let startupTimer;
     let requestSequence = 0;
+    const backgroundHotkeys = document.querySelector('#native-background-hotkeys');
+    let hotkeyRequest = '';
+    let hotkeyTimer;
+    let confirmedHotkeys = true;
     const applySettings = settings => {
+        if (typeof settings?.backgroundHotkeysEnabled === 'boolean') {
+            confirmedHotkeys = settings.backgroundHotkeysEnabled;
+            backgroundHotkeys.checked = confirmedHotkeys;
+            backgroundHotkeys.disabled = !host || Boolean(hotkeyRequest);
+        }
         if (typeof settings?.launchAtStartup !== 'boolean') return;
         confirmedStartup = settings.launchAtStartup;
         autostart.checked = confirmedStartup;
@@ -365,6 +372,17 @@
         const count = topology.monitors.length;
         monitorCount.textContent = `${count} display${count === 1 ? '' : 's'} connected`;
     };
+    backgroundHotkeys.addEventListener('change', () => {
+        if (hotkeyRequest) return;
+        hotkeyRequest = `background-${++requestSequence}`;
+        backgroundHotkeys.disabled = true;
+        send('UPDATE_SETTINGS', {requestId:hotkeyRequest, settings:{backgroundHotkeysEnabled:backgroundHotkeys.checked}});
+        hotkeyTimer = setTimeout(() => {
+            hotkeyRequest = ''; backgroundHotkeys.checked = confirmedHotkeys; backgroundHotkeys.disabled = !host;
+            document.querySelector('#background-settings-status').textContent = 'Could not confirm the setting. Please try again.';
+            send('GET_SETTINGS');
+        }, 10000);
+    });
     autostart.addEventListener('change', () => {
         if (startupRequest) return;
         startupRequest = `startup-${++requestSequence}`;
@@ -395,6 +413,11 @@
                 renderCards();
             }
         } else if (['SETTINGS_CHANGED', 'SETTINGS_RESULT', 'TOGGLE_AUTOSTART_RESULT'].includes(data?.action)) {
+            if (data.action === 'SETTINGS_RESULT' && hotkeyRequest && data.requestId === hotkeyRequest) {
+                clearTimeout(hotkeyTimer); hotkeyRequest = ''; backgroundHotkeys.disabled = !host;
+                backgroundHotkeys.checked = confirmedHotkeys;
+                document.querySelector('#background-settings-status').textContent = data.success ? 'Background hotkey setting saved.' : (data.error || 'Could not save the setting.');
+            }
             if (data.action === 'TOGGLE_AUTOSTART_RESULT') {
                 if (data.requestId !== startupRequest) return;
                 clearTimeout(startupTimer); startupRequest = '';

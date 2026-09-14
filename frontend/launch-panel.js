@@ -39,6 +39,7 @@
         const attention = state === 'partial' || data.failed > 0;
         const layoutChanged = changed || panel.dataset.attention !== String(attention);
         panel.dataset.attention = String(attention);
+        panel.classList.toggle('error-card', attention);
         if (changed) { clearTimeout(timer); clearTimeout(exitTimer); exitMotion?.cancel(); $('.content').style.height = ''; panel.classList.remove('leaving'); }
         panel.dataset.state = state;
         if (state === 'cancelled') { leave(); return; }

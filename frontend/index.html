@@ -48,16 +48,6 @@
             </nav>
 
             <div class="sidebar-bottom">
-                <div class="native-preferences-slot">
-                  <div class="native-preferences-accordion" id="native-preferences-drawer">
-                   <div class="native-preferences-clip">
-                    <div class="native-preferences">
-                    <span id="native-monitor-count" role="status">Checking displays...</span>
-                    <label><input id="native-autostart" type="checkbox" disabled> Launch at Windows startup</label>
-                    </div>
-                   </div>
-                  </div>
-                </div>
                 <div class="sidebar-divider" aria-hidden="true"></div>
                 <nav class="navigation navigation-secondary" aria-label="Support navigation">
                     <a class="nav-link" href="#developer"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 7-5 5 5 5m8-10 5 5-5 5m-3-13-2 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Developer</span></a>
@@ -72,6 +62,36 @@
                 
                 <h1 id="page-title" tabindex="-1">Your <span class="accent">biomes</span></h1>
             </header>
+
+            <section id="settings-page" class="settings-page" hidden aria-label="Settings">
+                <div class="coming-banner settings-banner">
+                    <img src="images/clouds sky.jpg" alt="">
+                    <h2>Your rhythm. <span class="accent">Your rules.</span></h2>
+                </div>
+                <div class="coming-copy settings-intro">
+                    <p class="coming-kicker privacy-badge" id="startup-settings-title">Startup &amp; background</p>
+                    <h3>Make yourself at home</h3>
+                    <p>A little fine-tuning for the way you work.</p>
+                </div>
+                <div class="native-preferences" aria-labelledby="startup-settings-title">
+                    <header class="settings-card-heading">
+                        <p>Keep biomes ready when you need it. You choose how it fits into your day.</p>
+                    </header>
+                    <div class="setting-row">
+                        <label><input id="native-autostart" type="checkbox" disabled aria-describedby="startup-description"> Launch at Windows startup</label>
+                        <p id="startup-description">Start quietly in the system tray when you sign in to Windows.</p>
+                    </div>
+                    <div class="setting-row">
+                        <label><input id="native-background-hotkeys" type="checkbox" disabled aria-describedby="hotkeys-description"> Enable background hotkeys</label>
+                        <p id="hotkeys-description">Use your workspace shortcuts while biomes is running, even with the dashboard tucked away in the tray.</p>
+                    </div>
+                    <footer class="settings-card-footer">
+                        <span id="native-monitor-count" role="status">Checking displays...</span>
+                        <p id="background-settings-status" role="status"></p>
+                    </footer>
+                </div>
+                <div class="coming-copy settings-return"><a class="back-home" href="#biomes">Back to your biomes <span aria-hidden="true">&#8599;</span></a></div>
+            </section>
 
             <section class="biome-grid" id="home-page" aria-label="Saved biomes">
 <article class="biome-card">

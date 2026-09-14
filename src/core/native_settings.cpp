@@ -28,13 +28,13 @@ void Save(const json& data) {
 }
 json Load() {
     if (!std::filesystem::exists(AppPaths::SettingsFile()))
-        return {{"schemaVersion",1},{"launchAtStartup",false},{"onboardingCompleted",false}};
+        return {{"schemaVersion",1},{"launchAtStartup",false},{"onboardingCompleted",false},{"backgroundHotkeysEnabled",true}};
     if (std::filesystem::file_size(AppPaths::SettingsFile()) > 1024 * 1024) throw std::runtime_error("Settings file too large");
     std::ifstream file(AppPaths::SettingsFile());
     auto data = json::parse(file);
     if (!data.is_object() || data.value("schemaVersion",1) != 1) throw std::runtime_error("Unsupported settings schema");
-    for (const auto* key : {"launchAtStartup","onboardingCompleted"}) {
-        if (!data.contains(key)) data[key] = false;
+    for (const auto* key : {"launchAtStartup","onboardingCompleted","backgroundHotkeysEnabled"}) {
+        if (!data.contains(key)) data[key] = std::string(key) == "backgroundHotkeysEnabled";
         if (!data[key].is_boolean()) throw std::runtime_error("Invalid settings value");
     }
     data["schemaVersion"] = 1;
@@ -50,7 +50,7 @@ nlohmann::json NativeSettings::Read() {
 nlohmann::json NativeSettings::Update(const nlohmann::json& patch) {
     if (!patch.is_object()) throw std::runtime_error("Settings patch must be an object");
     for (const auto& item : patch.items()) {
-        if ((item.key() != "launchAtStartup" && item.key() != "onboardingCompleted") || !item.value().is_boolean())
+        if ((item.key() != "launchAtStartup" && item.key() != "onboardingCompleted" && item.key() != "backgroundHotkeysEnabled") || !item.value().is_boolean())
             throw std::runtime_error("Unsupported settings field or type");
     }
     Lock lock;

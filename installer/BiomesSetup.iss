@@ -9,10 +9,11 @@
 [Setup]
 ; Stable across releases: upgrades retain the same per-user uninstall entry.
 AppId={{CE068B3E-38EE-4A60-916A-BFB2BEA3DC96}
-AppName=Biomes
+AppName=biomes
 AppVersion={#AppVersion}
-AppPublisher=Biomes
-DefaultDirName={userpf}\Biomes
+AppPublisher=biomes
+AppPublisherURL=https://github.com/AbdelGhafourRebbouh/biomes
+DefaultDirName={userpf}\biomes
 PrivilegesRequired=lowest
 DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\Biomes.exe
@@ -20,7 +21,7 @@ SetupIconFile=..\resources\biomes.ico
 LicenseFile={#PackageDir}\LICENSE
 InfoBeforeFile=InstallerNotes.txt
 OutputDir={#OutputDir}
-OutputBaseFilename=BiomesSetup-v{#AppVersion}
+OutputBaseFilename=biomesSetup-v{#AppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -40,11 +41,11 @@ Source: "{#PackageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 Source: "{#PackageDir}\prerequisites\MicrosoftEdgeWebview2Setup.exe"; Flags: dontcopy
 
 [Icons]
-Name: "{userprograms}\Biomes"; Filename: "{app}\Biomes.exe"; WorkingDir: "{app}"
-Name: "{userdesktop}\Biomes"; Filename: "{app}\Biomes.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{userprograms}\biomes"; Filename: "{app}\Biomes.exe"; WorkingDir: "{app}"
+Name: "{userdesktop}\biomes"; Filename: "{app}\Biomes.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\Biomes.exe"; Description: "Launch Biomes"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\Biomes.exe"; Description: "Launch biomes"; Flags: nowait postinstall skipifsilent
 
 ; No wildcard uninstall deletion and no operations on {localappdata}\biomes.
 ; Inno removes only installed files, shortcuts, and its per-user uninstall entry.
@@ -71,7 +72,7 @@ begin
   AppDir := AddBackslash(Lowercase(ExpandConstant('{app}')));
   DataDir := AddBackslash(Lowercase(ExpandConstant('{localappdata}\biomes')));
   if Pos(DataDir, AppDir) = 1 then begin
-    Result := 'Choose an application folder outside the Biomes personal-data directory.';
+    Result := 'Choose an application folder outside the biomes personal-data directory.';
     Exit;
   end;
   if HasWebView2 then Exit;

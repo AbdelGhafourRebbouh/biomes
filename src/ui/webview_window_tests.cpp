@@ -85,14 +85,22 @@ int main() {
         trustedPage.resize(wideCount);
         MultiByteToWideChar(CP_UTF8, 0, dashboardUrl.data(), static_cast<int>(dashboardUrl.size()), trustedPage.data(), wideCount);
         const auto publish = [] {
-            WebViewWindow::SendMessageToUI(R"({"action":"NATIVE_STATE","success":true,"state":{"settings":{"launchAtStartup":true},"topology":{"monitors":[{},{}]},"biomes":[],"activeId":""}})");
+            WebViewWindow::SendMessageToUI(R"({"action":"NATIVE_STATE","success":true,"state":{"settings":{"launchAtStartup":true,"backgroundHotkeysEnabled":true},"topology":{"monitors":[{},{}]},"biomes":[],"activeId":""}})");
         };
         bool loadedDashboard = false;
         WebViewWindow::SetPageReadyCallback([&] { publish(); loadedDashboard = true; });
         WebViewWindow::SetMessageReceivedCallback([&](const std::string& message) {
             const auto request = nlohmann::json::parse(message);
             if (request.value("action", "") == "GET_NATIVE_STATE") publish();
+            if (request.value("action", "") == "ONBOARDING_WINDOW")
+                WebViewWindow::SetOnboardingMode(request.at("firstRun").get<bool>());
+            if (request.value("action", "") == "UPDATE_SETTINGS")
+                WebViewWindow::SendMessageToUI(nlohmann::json({{"action","SETTINGS_RESULT"},{"success",true},
+                    {"requestId",request.at("requestId")},{"settings",request.at("settings")}}).dump());
         });
+        ShowWindow(WebViewWindow::GetHwnd(), SW_SHOWNOACTIVATE);
+        retained->put_IsVisible(TRUE);
+        RECT beforeOnboarding{}; GetWindowRect(WebViewWindow::GetHwnd(), &beforeOnboarding);
         require(SUCCEEDED(dashboard->Navigate(trustedPage.c_str())), "navigate to shipped dashboard");
         const auto dashboardDeadline = GetTickCount64() + 10000;
         while (!loadedDashboard && GetTickCount64() < dashboardDeadline) {
@@ -127,15 +135,17 @@ int main() {
         // Real animation sampling needs a visible controller (hidden pages throttle timers).
         ShowWindow(WebViewWindow::GetHwnd(), SW_SHOWNOACTIVATE);
         retained->put_IsVisible(TRUE);
-        // Exercise actual CSS transitions while native state arrives in the collapsed drawer.
+        // Verify first-run/replay modes and native settings in the actual dashboard.
         const auto checkScript = [&](const wchar_t* script) {
             bool passed = false;
+            std::wstring lastResult;
             const auto deadline = GetTickCount64() + 5000;
             while (!passed && GetTickCount64() < deadline) {
                 bool evaluated = false;
                 auto handler = CreateCallbackRaw<ICoreWebView2ExecuteScriptCompletedHandler, HRESULT, LPCWSTR>(
                     [&](HRESULT result, LPCWSTR value) -> HRESULT {
                         passed = SUCCEEDED(result) && value && std::wstring(value) == L"true";
+                        lastResult = value ? value : L"no script result";
                         evaluated = true; return S_OK;
                     });
                 const auto result = dashboard->ExecuteScript(script, handler);
@@ -148,49 +158,115 @@ int main() {
                 }
                 require(evaluated, "sidebar regression script callback");
             }
-            require(passed, "sidebar animation, native events, and beta badges");
+            if (!passed) std::wcerr << lastResult << L'\n';
+            require(passed, "settings relocation, native events, and onboarding");
         };
+        checkScript(LR"(Boolean(document.body.classList.contains('is-first-run') &&
+            getComputedStyle(document.querySelector('.app-shell')).visibility === 'hidden' &&
+            document.querySelector('#onboarding').open &&
+            document.querySelector('.onboarding-next').getBoundingClientRect().bottom <= innerHeight))");
+        RECT firstRunBounds{}; GetWindowRect(WebViewWindow::GetHwnd(), &firstRunBounds);
+        const auto testDpi = GetDpiForWindow(WebViewWindow::GetHwnd());
+        require(firstRunBounds.right - firstRunBounds.left == MulDiv(800, testDpi, 96) &&
+            firstRunBounds.bottom - firstRunBounds.top == MulDiv(520, testDpi, 96), "first-run native frame is 800x520 DIP");
+        for (const auto& size : {SIZE{800,520}, SIZE{760,400}, SIZE{640,400}, SIZE{533,347}}) {
+        SetWindowPos(WebViewWindow::GetHwnd(), nullptr, 0, 0,
+            MulDiv(size.cx, testDpi, 96), MulDiv(size.cy, testDpi, 96), SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        // Set the viewport explicitly even if native minimum tracking dimensions
+        // clamp the HWND on this test machine's monitor.
+        RECT viewport{0, 0, MulDiv(size.cx, testDpi, 96), MulDiv(size.cy, testDpi, 96)};
+        require(SUCCEEDED(retained->put_Bounds(viewport)), "resize onboarding test viewport");
+        checkScript((L"innerWidth === " + std::to_wstring(size.cx) + L" && innerHeight === " + std::to_wstring(size.cy)).c_str());
         require(SUCCEEDED(dashboard->ExecuteScript(LR"(
-            document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
-            document.documentElement.dataset.theme = 'dark';
-            window.sidebarRegression = false;
+            window.onboardingFits = false;
+            window.onboardingDiagnostics = [];
             (async () => {
-                const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
-                const toggle = document.querySelector('.sidebar-toggle');
-                const shell = document.querySelector('.app-shell');
-                const drawer = document.querySelector('#native-preferences-drawer');
-                const nav = document.querySelector('.navigation-secondary');
-                if (shell.classList.contains('is-sidebar-collapsed')) toggle.click();
-                await pause(600);
-                const top = nav.getBoundingClientRect().top;
-                const expanded = drawer.getBoundingClientRect().height;
-                toggle.click();
-                let stable = true;
-                for (let i = 0; i < 15; i++) {
-                    await pause(20);
-                    stable = stable && Math.abs(nav.getBoundingClientRect().top - top) < 1;
+                await document.fonts.ready;
+                await Promise.all(document.querySelector('#onboarding').getAnimations({subtree:true}).map(a=>a.finished.catch(()=>{})));
+                let fits = true;
+                for (const dot of document.querySelectorAll('.onboarding-dots button')) {
+                    dot.click(); await new Promise(resolve => setTimeout(resolve, 350));
+                    await Promise.all(document.querySelector('#onboarding').getAnimations({subtree:true}).map(a=>a.finished.catch(()=>{})));
+                    const slide = document.querySelector('.onboarding-slide').getBoundingClientRect();
+                    const footer = document.querySelector('.onboarding-footer').getBoundingClientRect();
+                    const top = document.querySelector('.onboarding-top').getBoundingClientRect();
+                    fits = fits && footer.bottom <= innerHeight && slide.top >= top.bottom && slide.bottom <= footer.top + 1;
+                    for (const selector of ['#onboarding', '.onboarding-layout', '.onboarding-copy', '.onboarding-slide']) {
+                        const element = document.querySelector(selector);
+                        fits = fits && element.scrollWidth <= element.clientWidth + 1 && element.scrollHeight <= element.clientHeight + 1;
+                    }
+                    for (const selector of ['#onboarding-title', '#onboarding-subtitle', '#onboarding-description']) {
+                        const rect = document.querySelector(selector).getBoundingClientRect();
+                        fits = fits && rect.top >= slide.top - 1 && rect.bottom <= slide.bottom + 1 && rect.left >= slide.left - 1 && rect.right <= slide.right + 1;
+                    }
+                    if (!fits) window.onboardingDiagnostics.push({card:dot.getAttribute('aria-label'), width:innerWidth, height:innerHeight,
+                        boxes:[...document.querySelectorAll('#onboarding,.onboarding-layout,.onboarding-copy,.onboarding-slide,#onboarding-title,#onboarding-subtitle,#onboarding-description,.onboarding-footer')].map(e=>({name:e.id||e.className, rect:e.getBoundingClientRect().toJSON(),client:[e.clientWidth,e.clientHeight],scroll:[e.scrollWidth,e.scrollHeight]}))});
                 }
-                window.sidebarCollapsed = drawer.inert && drawer.getBoundingClientRect().height < 1 && expanded > 0;
-                window.sidebarNavStable = stable;
+                window.onboardingFits = fits;
             })();
-        )", nullptr)), "start sidebar collapse");
-        checkScript(L"Boolean(window.sidebarCollapsed && window.sidebarNavStable)");
+        )", nullptr)), "check all onboarding slides");
+        checkScript(L"window.onboardingFits === true || JSON.stringify(window.onboardingDiagnostics)");
+        }
+        SetWindowPos(WebViewWindow::GetHwnd(), nullptr, 0, 0,
+            firstRunBounds.right - firstRunBounds.left, firstRunBounds.bottom - firstRunBounds.top,
+            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        require(SUCCEEDED(dashboard->ExecuteScript(LR"(
+            document.querySelector('.onboarding-skip').click();
+            document.querySelector('#replay-onboarding').click();
+        )", nullptr)), "replay introduction");
+        checkScript(LR"(Boolean(document.querySelector('#onboarding').open &&
+            !document.body.classList.contains('is-first-run') &&
+            getComputedStyle(document.querySelector('.app-shell')).visibility === 'visible'))");
+        require(SUCCEEDED(dashboard->ExecuteScript(LR"(
+            document.querySelector('.onboarding-skip').click();
+            location.hash = '#customization';
+            document.documentElement.dataset.theme = 'dark';
+        )", nullptr)), "open settings");
+        checkScript(LR"(Boolean(!document.querySelector('#settings-page').hidden &&
+            !document.querySelector('.sidebar .native-preferences') &&
+            document.querySelector('#settings-page #native-autostart') &&
+            document.querySelector('#native-background-hotkeys').checked))");
+        require(SUCCEEDED(dashboard->ExecuteScript(L"document.querySelector('#native-background-hotkeys').click()", nullptr)), "update background setting");
+        checkScript(LR"(Boolean(!document.querySelector('#native-background-hotkeys').checked &&
+            !document.querySelector('#native-background-hotkeys').disabled))");
         WebViewWindow::SendMessageToUI(R"({"action":"MONITOR_CHANGED","topology":{"monitors":[{}]}})");
         WebViewWindow::SendMessageToUI(R"({"action":"SETTINGS_RESULT","success":true,"settings":{"launchAtStartup":false}})");
-        WebViewWindow::SendMessageToUI(R"({"action":"LOADED_BIOMES","biomes":[{"id":"beta-test","name":"Beta card","apps":[]}],"activeId":""})");
         checkScript(LR"(Boolean(document.querySelector('#native-monitor-count').textContent === '1 display connected' &&
-            !document.querySelector('#native-autostart').checked && document.querySelector('#native-preferences-drawer').inert &&
-            document.querySelector('.brand-beta').textContent === 'BETA' &&
-            document.querySelector('#home-page .card-beta').textContent === 'BETA'))");
+            !document.querySelector('#native-autostart').checked))");
+        checkScript(L"!document.body.classList.contains('is-first-run')");
+        RECT restoredBounds{}; GetWindowRect(WebViewWindow::GetHwnd(), &restoredBounds);
+        require(IsWindowVisible(WebViewWindow::GetHwnd()) && restoredBounds.bottom - restoredBounds.top == beforeOnboarding.bottom - beforeOnboarding.top &&
+            restoredBounds.right - restoredBounds.left == beforeOnboarding.right - beforeOnboarding.left,
+            "finishing onboarding restores dashboard size and visibility");
+        require(SUCCEEDED(dashboard->ExecuteScript(L"window.captureSettled=false;setTimeout(()=>window.captureSettled=true,600)", nullptr)), "settle theme transition");
+        checkScript(L"window.captureSettled === true");
         require(SUCCEEDED(dashboard->ExecuteScript(LR"(
-            document.querySelector('.sidebar-toggle').click();
-            setTimeout(() => {
-                const drawer = document.querySelector('#native-preferences-drawer');
-                const css = getComputedStyle(document.querySelector('.native-preferences'));
-                window.sidebarRegression = !drawer.inert && drawer.getBoundingClientRect().height > 0 && css.opacity === '1';
-            }, 600);
-        )", nullptr)), "expand updated sidebar");
-        checkScript(L"window.sidebarRegression === true");
+            const customBanner = document.querySelector('#settings-page .coming-banner');
+            const bounds = customBanner.getBoundingClientRect();
+            window.customBannerStyle = {width:bounds.width, height:bounds.height,
+                radius:getComputedStyle(customBanner).borderRadius,
+                font:getComputedStyle(customBanner.querySelector('h2')).fontSize};
+            location.hash = '#privacy';
+        )", nullptr)), "navigate to Privacy after Customization");
+        checkScript(LR"(Boolean(!document.querySelector('#coming-page').hidden &&
+            document.querySelector('#coming-title').textContent === 'Privacy First' &&
+            document.querySelector('#coming-page .coming-kicker').textContent === 'Local & Open Source' &&
+            document.querySelector('#coming-page .coming-kicker').classList.contains('privacy-badge') &&
+            document.querySelector('#startup-settings-title').textContent === 'Startup & background'))");
+        checkScript(LR"((() => {
+            const banner = document.querySelector('#coming-page .coming-banner');
+            const bounds = banner.getBoundingClientRect(), saved = window.customBannerStyle;
+            return Math.abs(bounds.width-saved.width)<1 && Math.abs(bounds.height-saved.height)<1 &&
+                getComputedStyle(banner).borderRadius === saved.radius &&
+                getComputedStyle(banner.querySelector('h2')).fontSize === saved.font;
+        })())");
+        require(SUCCEEDED(dashboard->ExecuteScript(L"location.hash='#insights'", nullptr)), "navigate to Insights");
+        checkScript(LR"(Boolean(document.querySelector('#coming-page .coming-kicker').textContent === 'A little more biomes, on the way' &&
+            document.querySelector('#startup-settings-title').textContent === 'Startup & background' &&
+            document.querySelector('#startup-settings-title').classList.contains('privacy-badge')))");
+        require(SUCCEEDED(dashboard->ExecuteScript(L"location.hash='#customization'", nullptr)), "return to Customization");
+        checkScript(LR"(Boolean(!document.querySelector('#settings-page').hidden &&
+            document.querySelector('#startup-settings-title').textContent === 'Startup & background'))");
         wchar_t screenshotPath[32768]{};
         if (GetEnvironmentVariableW(L"BIOMES_TEST_SCREENSHOT", screenshotPath, 32768)) {
             IStream* stream = nullptr;

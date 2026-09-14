@@ -1,10 +1,10 @@
-# Biomes 1.0.0-beta for Windows
+# biomes 1.0.0-beta for Windows
 
 Extract the whole ZIP to a dedicated folder, such as
 `%LOCALAPPDATA%\Programs\biomes`, then run `Biomes.exe`. Keep the loader DLL and
 all bundled assets beside the executable. No administrator elevation is needed
 for Biomes. Closing its dashboard leaves the background engine in the system
-tray; use **Exit Biomes** before replacing application files.
+tray; use **Exit biomes** before replacing application files.
 
 If Microsoft WebView2 Evergreen Runtime is missing, run
 `prerequisites\MicrosoftEdgeWebview2Setup.exe` as your normal user, then launch
@@ -45,9 +45,9 @@ personal data are excluded. The project license is included as `LICENSE`.
 
 Run `scripts/build_installer.ps1` with Inno Setup 6 installed (or pass
 `-IsccPath`). It builds and tests Release, refreshes the allowlisted ZIP, checks
-its payload, and produces `dist/BiomesSetup-v1.0.0-beta.exe` plus its SHA-256 file.
+its payload, and produces `dist/biomesSetup-v1.0.0-beta.exe` plus its SHA-256 file.
 
-Setup defaults to `%LOCALAPPDATA%\Programs\Biomes`, creates a Start Menu shortcut,
+Setup defaults to `%LOCALAPPDATA%\Programs\biomes`, creates a Start Menu shortcut,
 and offers an optional Desktop shortcut. A missing WebView2 Runtime is installed
 with the Microsoft bootstrapper before app files are copied; internet is needed.
 The per-user Windows Installed Apps entry uninstalls binaries and shortcuts while

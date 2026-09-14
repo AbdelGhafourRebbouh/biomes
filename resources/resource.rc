@@ -17,13 +17,13 @@ BEGIN
     BEGIN
         BLOCK "040904B0"
         BEGIN
-            VALUE "CompanyName", "Biomes"
-            VALUE "FileDescription", "Biomes"
+            VALUE "CompanyName", "biomes"
+            VALUE "FileDescription", "biomes"
             VALUE "FileVersion", "1.0.0-beta"
             VALUE "InternalName", "Biomes"
             VALUE "LegalCopyright", "Copyright (C) 2026 Abdelghafour Rebbouh"
             VALUE "OriginalFilename", "Biomes.exe"
-            VALUE "ProductName", "Biomes"
+            VALUE "ProductName", "biomes"
             VALUE "ProductVersion", "1.0.0-beta"
         END
     END

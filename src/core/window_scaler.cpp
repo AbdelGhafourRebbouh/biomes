@@ -258,7 +258,7 @@ void CALLBACK LaunchWorker(PTP_CALLBACK_INSTANCE, void* parameter) {
             const auto& box = context->box;
             const auto& fullPath = context->fullPath;
             const bool obsidian = AppLauncher::IsObsidianExe(fullPath);
-            const bool packaged = AppLauncher::IsPackagedAppPath(fullPath) || !box.aumid.empty();
+            const bool packaged = AppLauncher::RequiresPackagedActivation(box, fullPath);
             string outError;
     DWORD pid = 0;
     bool launched = false;
@@ -277,7 +277,9 @@ void CALLBACK LaunchWorker(PTP_CALLBACK_INSTANCE, void* parameter) {
         STARTUPINFOA startup{};
         startup.cb = sizeof(startup);
         PROCESS_INFORMATION process{};
-        string commandLine = "\"" + fullPath + "\"";
+        const string arguments = AppLauncher::DesktopLaunchArguments(fullPath,
+            AppLauncher::IsChromeExe(fullPath) ? AppLauncher::ResolveChromeProfileDirectory() : "");
+        string commandLine = "\"" + fullPath + "\"" + (arguments.empty() ? "" : " " + arguments);
         vector<char> commandBuffer(commandLine.begin(), commandLine.end());
         commandBuffer.push_back('\0');
         launched = !result->cancelled.load() && CreateProcessA(fullPath.c_str(), commandBuffer.data(), nullptr, nullptr,
@@ -292,6 +294,7 @@ void CALLBACK LaunchWorker(PTP_CALLBACK_INSTANCE, void* parameter) {
             shell.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
             shell.lpVerb = "open";
             shell.lpFile = fullPath.c_str();
+            shell.lpParameters = arguments.empty() ? nullptr : arguments.c_str();
             shell.nShow = SW_SHOWNORMAL;
             launched = ShellExecuteExA(&shell) != FALSE;
             if (launched && shell.hProcess) {
@@ -339,7 +342,9 @@ bool MatchesPendingSnap(const PendingSnap& pending, const WindowInfo& window) {
 }
 
 int CandidateScore(const PendingSnap& pending, const WindowInfo& window) {
+    if (AppLauncher::IsChromeProfilePicker(window.processName, window.title)) return -1;
     if (!MatchesPendingSnap(pending, window)) return -1;
+    if (AppLauncher::IsChromeProfilePicker(pending.exeName, window.title)) return -1;
     int score = 100;
     if (pending.launchPid && window.processId == pending.launchPid) score += 100;
     if (!pending.box.titleHint.empty() && window.title == pending.box.titleHint) score += 200;
@@ -527,7 +532,7 @@ void ProcessPendingSnaps() {
         if (pending != g_pendingSnaps.end()) {
             if (job->result->success) {
                 pending->launchPid = job->result->pid;
-                pending->deadline = GetTickCount64() + 300000;
+                if (!pending->deadline) pending->deadline = GetTickCount64() + 15000;
                 TrackerLog("launch accepted id=" + to_string(job->id) + " pid=" + to_string(pending->launchPid));
             } else {
                 TrackerLog("launch failed id=" + to_string(job->id) + " " + job->result->error);
@@ -554,7 +559,7 @@ void ProcessPendingSnaps() {
     }
     for (auto& pending : g_pendingSnaps) {
         if (g_launchJobs.size() >= 3) break;
-        if (pending.dispatched) continue;
+        if (pending.dispatched || (pending.deadline && GetTickCount64() >= pending.deadline)) continue;
         auto result = make_shared<LaunchResult>();
         auto context = make_unique<LaunchContext>(LaunchContext{pending.box, pending.fullPath, result});
         g_launchJobs.push_back({pending.id, result});
@@ -579,14 +584,22 @@ void ProcessPendingSnaps() {
                            [&](const PendingSnap& item) { return item.id == pending.id; });
         };
         if (findPending() == g_pendingSnaps.end()) continue;
-        if (!pending.dispatched || pending.deadline == 0) continue;
+        if (pending.deadline == 0) continue;
         if (GetTickCount64() >= pending.deadline) {
             const auto progressItem = g_launchProgress.items.find(LaunchProgressState::Key(pending.box));
             if (progressItem != g_launchProgress.items.end() &&
                 (progressItem->second.state == "opening" || progressItem->second.state == "waiting"))
-                WindowScaler::ReportLaunchState(pending.box, "failed", "Timed out waiting for a workspace window.");
+                WindowScaler::ReportLaunchState(pending.box, "failed", "Application took too long to launch or is waiting for user input.");
             TrackerLog(string(pending.snappedHwnd ? "tracking completed id=" : "timeout id=") + to_string(pending.id) + " app=" + pending.exeName);
-            g_pendingSnaps.erase(findPending());
+            for (const auto& job : g_launchJobs)
+                if (job.id == pending.id) job.result->cancelled.store(true);
+            // A provisional window may still have a placement verifier queued.
+            // Timeout is terminal for this launch; do not publish ready later.
+            g_placementChecks.erase(remove_if(g_placementChecks.begin(), g_placementChecks.end(),
+                [&](const PlacementCheck& item) { return LaunchProgressState::Key(item.zone) == LaunchProgressState::Key(pending.box); }),
+                g_placementChecks.end());
+            const auto expired = findPending();
+            if (expired != g_pendingSnaps.end()) g_pendingSnaps.erase(expired);
             continue;
         }
         DWORD currentPid = 0;
@@ -615,7 +628,17 @@ void ProcessPendingSnaps() {
                 candidate = window.hwnd;
                 candidateInfo = &window;
                 ambiguous = false;
-            } else if (score == bestScore) ambiguous = true;
+            } else if (score == bestScore) {
+                // Chrome creates identical new-tab windows in a shared browser
+                // process. Assign new, unclaimed HWNDs in stable order; PID and
+                // title cannot distinguish these otherwise equivalent windows.
+                if (AppLauncher::IsChromeExe(pending.exeName)) {
+                    if (reinterpret_cast<uintptr_t>(window.hwnd) < reinterpret_cast<uintptr_t>(candidate)) {
+                        candidate = window.hwnd;
+                        candidateInfo = &window;
+                    }
+                } else ambiguous = true;
+            }
         }
         if (!candidate || ambiguous) {
             auto reset = findPending();
@@ -648,6 +671,7 @@ void ProcessPendingSnaps() {
             TrackerLog("placement requested id=" + to_string(pending.id) + " app=" + pending.exeName);
             current->snappedHwnd = candidate;
             current->provisionalWindow = IsStartupCandidate(*candidateInfo);
+            if (!current->provisionalWindow) current->deadline = GetTickCount64() + 300000;
             current->candidateHwnd = nullptr;
             current->candidateSince = 0;
             TrackerLog(string(current->provisionalWindow ? "startup window tracked id=" : "workspace bound id=") +
@@ -662,7 +686,10 @@ void ProcessPendingSnaps() {
 
 void CALLBACK PendingTimerProc(HWND, UINT, UINT_PTR timer, DWORD) {
     if (timer != g_pendingTimer) return;
-    if (!g_scanRequested && GetTickCount64() - g_lastScan < 2000) return;
+    const auto now = GetTickCount64();
+    const bool launchExpired = any_of(g_pendingSnaps.begin(), g_pendingSnaps.end(),
+        [now](const PendingSnap& pending) { return pending.deadline && now >= pending.deadline; });
+    if (!launchExpired && !g_scanRequested && now - g_lastScan < 2000) return;
     if (g_processingPending || g_trackingPaused) return;
     g_scanRequested = false;
     g_lastScan = GetTickCount64();
@@ -857,6 +884,7 @@ vector<WindowInfo> WindowScaler::GetActiveWindows() {
         info.processPath = identity.processPath;
         info.processName = identity.processName;
         info.aumid = identity.aumid;
+        if (AppLauncher::IsChromeProfilePicker(info.processName, info.title)) return TRUE;
         out->push_back(info);
         return TRUE;
     }, reinterpret_cast<LPARAM>(&windows));
@@ -1246,8 +1274,7 @@ HWND WindowScaler::LaunchAndSnapApp(const string& assignedApp,
     }
 
     // Store / packaged apps: AUMID activation only — never CreateProcess on WindowsApps path.
-    if (AppLauncher::IsPackagedAppPath(fullPath) || AppLauncher::IsPackagedAppPath(box.assignedApp) ||
-        !box.aumid.empty()) {
+    if (AppLauncher::RequiresPackagedActivation(box, fullPath)) {
         const auto candidates = AppLauncher::ResolveAumidCandidates(box);
         if (candidates.empty()) {
             cerr << "[LAUNCHER] Packaged app without AUMID — recreate zone while app is open" << endl;
@@ -1290,7 +1317,9 @@ HWND WindowScaler::LaunchAndSnapApp(const string& assignedApp,
 
     STARTUPINFOA si = { sizeof(si) };
     PROCESS_INFORMATION pi = {};
-    string commandLine = "\"" + fullPath + "\"";
+    const string arguments = AppLauncher::DesktopLaunchArguments(fullPath,
+        AppLauncher::IsChromeExe(fullPath) ? AppLauncher::ResolveChromeProfileDirectory() : "");
+    string commandLine = "\"" + fullPath + "\"" + (arguments.empty() ? "" : " " + arguments);
     vector<char> cmdBuf(commandLine.begin(), commandLine.end());
     cmdBuf.push_back('\0');
 
@@ -1316,6 +1345,7 @@ HWND WindowScaler::LaunchAndSnapApp(const string& assignedApp,
         sei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
         sei.lpVerb = "open";
         sei.lpFile = fullPath.c_str();
+        sei.lpParameters = arguments.empty() ? nullptr : arguments.c_str();
         sei.nShow = SW_SHOWNORMAL;
         if (!ShellExecuteExA(&sei)) {
             cerr << "[LAUNCHER] ShellExecuteEx failed (" << GetLastError() << ")" << endl;
@@ -1353,8 +1383,7 @@ bool WindowScaler::LaunchAndTrackApp(const string& assignedApp,
 
     const string fullPath = ResolveAppPath(assignedApp);
     const string exeName = filesystem::path(fullPath).filename().string();
-    const bool packaged = AppLauncher::IsPackagedAppPath(fullPath) ||
-                          AppLauncher::IsPackagedAppPath(box.assignedApp) || !box.aumid.empty();
+    const bool packaged = AppLauncher::RequiresPackagedActivation(box, fullPath);
     const bool obsidian = AppLauncher::IsObsidianExe(exeName) ||
                           AppLauncher::IsObsidianExe(box.assignedApp);
 
@@ -1383,7 +1412,7 @@ bool WindowScaler::LaunchAndTrackApp(const string& assignedApp,
     }
 
     pending.fullPath = fullPath;
-    pending.deadline = 0; // Starts only after the background launch completes.
+    pending.deadline = GetTickCount64() + 15000; // Includes blocked launch workers and queue time.
     if (generation != g_pendingGeneration) {
         StopPendingHooksIfIdle();
         outError = "workspace launch cancelled before queueing";

@@ -1,4 +1,4 @@
-# Frontend (deferred — not used in V1)
+# Optional frontend tooling outputs
 frontend/node_modules/
 frontend/dist/
 
@@ -7,6 +7,7 @@ build/
 build-release/
 build-stability/
 build-step3-review/
+build-*/
 bin/
 obj/
 out/
@@ -43,6 +44,6 @@ webview_data/
 logs/
 *.log
 *.old
-config/biomes_runtime.log
+config/
 **/config/biomes.json
 **/config/biomes.json.tmp

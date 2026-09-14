@@ -1,10 +1,10 @@
-Biomes 1.0.0-beta
+biomes 1.0.0-beta
 
-Biomes installs for your Windows account without administrator privileges.
+biomes installs for your Windows account without administrator privileges.
 If Microsoft WebView2 Runtime is missing, setup downloads it using the bundled
 Microsoft Evergreen bootstrapper. This step requires an internet connection.
 
-Exit Biomes from its system tray menu before upgrading an existing installation.
+Exit biomes from its system tray menu before upgrading an existing installation.
 Your layouts, settings, logs, and browser profile remain under
 %LOCALAPPDATA%\biomes. Upgrades and ordinary uninstall preserve this directory.
 

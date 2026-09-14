@@ -32,6 +32,12 @@ int main(int argc, char** argv) {
         Require(biomes::StartupRegistration::Command(L"C:\\Program Files\\Biomes.exe") == L"\"C:\\Program Files\\Biomes.exe\" --autostart","quoted startup path");
         Require(settings.Read()["launchAtStartup"] == false,"defaults");
         Require(fs::exists(biomes::AppPaths::SettingsFile()),"settings persisted");
+        Require(settings.Read()["backgroundHotkeysEnabled"] == true, "background hotkeys default enabled");
+        settings.Update({{"backgroundHotkeysEnabled",false}});
+        Require(settings.Read()["backgroundHotkeysEnabled"] == false, "background permission persists");
+        Throws([&] { settings.Update({{"backgroundHotkeysEnabled","yes"}}); });
+        Require(!registration.Read(), "hotkey preference does not create startup entry");
+
         settings.Update({{"launchAtStartup",true},{"onboardingCompleted",true}});
         Require(registration.IsEnabled(),"startup registered in isolated key");
         Require(settings.Read()["onboardingCompleted"] == true,"onboarding backend state");

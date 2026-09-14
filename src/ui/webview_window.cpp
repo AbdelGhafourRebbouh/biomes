@@ -16,6 +16,8 @@
 #include "../../resources/resource.h"
 
 namespace {
+bool onboardingMode = false;
+WINDOWPLACEMENT preOnboardingPlacement{sizeof(WINDOWPLACEMENT)};
 constexpr UINT kDispatchWebMessage = WM_APP + 71;
 constexpr UINT kPageReady = WM_APP + 72;
 constexpr UINT_PTR kRecoveryTimer = 0xB105;
@@ -121,7 +123,7 @@ bool WebViewWindow::Initialize(HINSTANCE hInstance, int nCmdShow, const std::str
     s_hwnd = CreateWindowExA(
         0, 
         "BiomesWebViewWindowClass",
-        "Biomes Workspace Engine",
+        "biomes",
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800,
         NULL, NULL, hInstance, NULL
@@ -362,7 +364,7 @@ LRESULT CALLBACK WebViewWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
             MONITORINFO monitor{sizeof(MONITORINFO)};
             const bool known = GetMonitorInfo(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &monitor) != FALSE;
             limits->ptMinTrackSize.x = (std::min<LONG>)(MulDiv(760, dpi, 96), known ? monitor.rcWork.right - monitor.rcWork.left : MAXLONG);
-            limits->ptMinTrackSize.y = (std::min<LONG>)(MulDiv(560, dpi, 96), known ? monitor.rcWork.bottom - monitor.rcWork.top : MAXLONG);
+            limits->ptMinTrackSize.y = (std::min<LONG>)(MulDiv(onboardingMode ? 400 : 560, dpi, 96), known ? monitor.rcWork.bottom - monitor.rcWork.top : MAXLONG);
             return 0;
         }
         case WM_NCCALCSIZE:
@@ -501,4 +503,25 @@ void WebViewWindow::MinimizeDashboard() {
     // Prefer minimize over hide so Biomes stays on the taskbar / Alt+Tab
     // while a biome session is active (hide feels like the app closed).
     ShowWindow(s_hwnd, SW_MINIMIZE);
+}
+
+void WebViewWindow::SetOnboardingMode(bool firstRun) {
+    if (!s_hwnd || onboardingMode == firstRun) return;
+    if (!firstRun) {
+        onboardingMode = false;
+        SetWindowPlacement(s_hwnd, &preOnboardingPlacement);
+        return;
+    }
+    preOnboardingPlacement.length = sizeof(WINDOWPLACEMENT);
+    if (!GetWindowPlacement(s_hwnd, &preOnboardingPlacement)) return;
+    MONITORINFO monitor{sizeof(MONITORINFO)};
+    if (!GetMonitorInfoW(MonitorFromWindow(s_hwnd, MONITOR_DEFAULTTONEAREST), &monitor)) return;
+    onboardingMode = true;
+    const auto dpi = GetDpiForWindow(s_hwnd);
+    const int width = (std::min<LONG>)(MulDiv(800, dpi, 96), monitor.rcWork.right - monitor.rcWork.left);
+    const int height = (std::min<LONG>)(MulDiv(520, dpi, 96), monitor.rcWork.bottom - monitor.rcWork.top);
+    if (IsZoomed(s_hwnd)) ShowWindow(s_hwnd, SW_RESTORE);
+    SetWindowPos(s_hwnd, nullptr, monitor.rcWork.left + (monitor.rcWork.right - monitor.rcWork.left - width) / 2,
+        monitor.rcWork.top + (monitor.rcWork.bottom - monitor.rcWork.top - height) / 2,
+        width, height, SWP_NOZORDER | SWP_NOACTIVATE);
 }

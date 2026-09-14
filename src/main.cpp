@@ -544,7 +544,7 @@ bool ActivateBiome(const std::string& biomeId, std::string& status) {
         }
 
         // Packaged/Store app without resolvable AUMID — skip instead of blocking error dialog.
-        if ((AppLauncher::IsPackagedAppPath(box.assignedApp) || !box.aumid.empty()) &&
+        if (AppLauncher::RequiresPackagedActivation(box) &&
             AppLauncher::ResolveAumidCandidates(box).empty()) {
             WindowScaler::ReportLaunchState(box, "failed", "Store app identity unavailable; recreate its zone.");
             ++failed;
@@ -631,6 +631,10 @@ bool ToggleBiome(const std::string& biomeId, std::string& status) {
 
 void SyncHotkeysFromDisk() {
     if (g_recordingHotkey) return;
+    if (!g_settings->Read().value("backgroundHotkeysEnabled", true)) {
+        HotkeyManager::Clear(g_background->Hwnd());
+        return;
+    }
     std::vector<BiomeProfile> profiles;
     JsonManager::LoadBiomesFromFile(GetBiomesConfigPath(), profiles);
     HotkeyManager::SyncBiomeHotkeys(g_background->Hwnd(), profiles);
@@ -687,6 +691,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     ipcServices.settings = [] { g_settings->ReconcileStartup(); return g_settings->Read(); };
     ipcServices.updateSettings = [](const json& patch) {
         const auto updated = g_settings->Update(patch);
+        if (patch.contains("backgroundHotkeysEnabled")) SyncHotkeysFromDisk();
         if (g_ipc) g_ipc->Broadcast("SETTINGS_CHANGED", {{"settings", updated}});
         return updated;
     };
@@ -756,6 +761,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     background.hotkey = [](int hotkeyId) {
         try {
+        if (!g_settings->Read().value("backgroundHotkeysEnabled", true)) return;
         const std::string biomeId = HotkeyManager::ResolveBiomeId(hotkeyId);
         if (biomeId.empty()) return;
         std::string status;
@@ -858,6 +864,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                 g_recordingHotkey = request.value("recording", false);
                 if (g_recordingHotkey) HotkeyManager::Clear(g_background->Hwnd());
                 else SyncHotkeysFromDisk();
+            }
+            else if (action == "ONBOARDING_WINDOW") {
+                if (request.contains("firstRun") && request["firstRun"].is_boolean())
+                    WebViewWindow::SetOnboardingMode(request["firstRun"].get<bool>());
             }
             else if (action == "WINDOW_CONTROL") {
                 const auto command = request.value("command", "");

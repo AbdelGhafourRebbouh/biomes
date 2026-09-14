@@ -16,6 +16,7 @@
 #include <appmodel.h>
 #include <shobjidl.h>
 #include <shellapi.h>
+#include <shlobj.h>
 
 #pragma comment(lib, "ole32.lib")
 
@@ -441,6 +442,74 @@ bool ActivatePackagedAppViaAppsFolder(const string& aumid, DWORD& outPid) {
 bool AppLauncher::IsPackagedAppPath(const string& path) {
     const string lower = ToLower(path);
     return lower.find("\\windowsapps\\") != string::npos;
+}
+
+bool AppLauncher::RequiresPackagedActivation(const SelectedBox& box, const string& resolvedPath) {
+    return IsPackagedAppPath(box.assignedApp) || IsPackagedAppPath(resolvedPath) || IsValidAumid(box.aumid);
+}
+
+bool AppLauncher::IsChromeExe(const string& exeOrPath) {
+    const auto separator = exeOrPath.find_last_of("\\/");
+    return ToLower(exeOrPath.substr(separator == string::npos ? 0 : separator + 1)) == "chrome.exe";
+}
+
+bool AppLauncher::IsChromeProfilePicker(const string& exeOrPath, const string& title) {
+    // Chrome's picker has the product-only title, rather than a tab title.
+    // Leave this transient HWND alone while waiting for the actual browser.
+    return IsChromeExe(exeOrPath) && (title.empty() || title == "Google Chrome");
+}
+
+namespace {
+bool IsSafeChromeProfileDirectory(const string& name) {
+    // Chrome-generated directories are Default / Profile N. Accept simple
+    // custom names, but never paths, command-line syntax or special profiles.
+    return !name.empty() && name.size() <= 128 && name != "System Profile" && name != "Guest Profile" &&
+        all_of(name.begin(), name.end(), [](unsigned char c) {
+            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                   (c >= '0' && c <= '9') || c == ' ' || c == '-' || c == '_';
+        }) && name.front() != ' ' && name.back() != ' ';
+}
+}
+
+string AppLauncher::ResolveChromeProfileDirectory(const filesystem::path& userDataDirectory) {
+    try {
+        auto root = userDataDirectory;
+        if (root.empty()) {
+            PWSTR local = nullptr;
+            const HRESULT result = SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local);
+            if (FAILED(result)) { CoTaskMemFree(local); return ""; }
+            root = filesystem::path(local);
+            CoTaskMemFree(local);
+            root /= L"Google/Chrome/User Data";
+        }
+        // Limit even malformed/concurrently replaced metadata to 4 MB.
+        ifstream file(root / L"Local State", ios::binary);
+        if (!file) return "";
+        string bytes(4 * 1024 * 1024 + 1, '\0');
+        file.read(bytes.data(), static_cast<streamsize>(bytes.size()));
+        const auto size = file.gcount();
+        if (size > 4 * 1024 * 1024 || file.bad()) return "";
+        bytes.resize(static_cast<size_t>(size));
+        const auto state = json::parse(bytes, nullptr, false);
+        if (!state.is_object() || !state.contains("profile") || !state["profile"].is_object()) return "";
+        const auto& profile = state["profile"];
+        if (!profile.contains("last_used") || !profile["last_used"].is_string()) return "";
+        const string name = profile["last_used"].get<string>();
+        if (!IsSafeChromeProfileDirectory(name) || !profile.contains("info_cache") ||
+            !profile["info_cache"].is_object() || !profile["info_cache"].contains(name)) return "";
+        // Never ask Chrome to create an arbitrary account/profile directory.
+        return filesystem::is_directory(root / name) ? name : "";
+    } catch (...) {
+        return ""; // Unavailable/corrupt Chrome metadata must not break launches.
+    }
+}
+
+string AppLauncher::DesktopLaunchArguments(const string& exeOrPath, const string& chromeProfile) {
+    if (!IsChromeExe(exeOrPath)) return "";
+    // Unlike a bare new-tab URL, an explicit profile also handles multi-profile
+    // startup. This does not change Chrome's Show on startup preference.
+    return string("--new-window ") + (IsSafeChromeProfileDirectory(chromeProfile)
+        ? "--profile-directory=\"" + chromeProfile + "\" " : "") + "chrome://newtab/";
 }
 
 bool AppLauncher::IsObsidianExe(const string& exeOrPath) {

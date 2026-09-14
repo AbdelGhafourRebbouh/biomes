@@ -25,6 +25,7 @@ public:
 
     // Hide the dashboard so the fullscreen grid is not confused with the app window.
     static void HideDashboard();
+    static void SetOnboardingMode(bool firstRun);
 
     // Minimize to the taskbar while a biome is open (keeps Biomes alive and restorable).
     static void MinimizeDashboard();

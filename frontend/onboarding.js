@@ -60,19 +60,29 @@
         }
         if (focus) $('#onboarding-title').focus({preventScroll:true});
     }
-    function open() {
+    let firstRunVisit = false;
+    function open(firstRun = false) {
         if (dialog.open) return;
+        firstRunVisit = firstRun;
+        document.body.classList.toggle('is-first-run', firstRun);
+        if (firstRun) window.chrome?.webview?.postMessage({action:'ONBOARDING_WINDOW', firstRun:true});
         navigationReadyAt = 0;
         previousFocus = document.activeElement;
         render(0);
         dialog.showModal();
         $('#onboarding-title').focus({preventScroll:true});
     }
+    function leaveFirstRun() {
+        document.body.classList.remove('is-first-run');
+        if (firstRunVisit) window.chrome?.webview?.postMessage({action:'ONBOARDING_WINDOW', firstRun:false});
+        firstRunVisit = false;
+    }
     function finish() {
         completedThisSession = true;
         try { localStorage.setItem(storageKey, 'true'); } catch {
             // Storage-disabled previews still remain usable; do not trap users.
         }
+        leaveFirstRun();
         dialog.close();
     }
     function navigate(index) {
@@ -94,6 +104,7 @@
     // Escape dismisses this visit without marking the introduction completed.
     dialog.addEventListener('close', () => {
         motion?.cancel();
+        leaveFirstRun();
         const focusTarget = previousFocus?.isConnected && !previousFocus.closest('dialog:not([open])')
             ? previousFocus : document.querySelector('#page-title');
         focusTarget?.focus({preventScroll:true});
@@ -105,5 +116,5 @@
     try { completed = localStorage.getItem(storageKey) === 'true'; } catch { /* Show once this visit. */ }
     // Query opt-in supports repeatable previews without clearing user settings.
     const preview = new URLSearchParams(location.search).get('onboarding') === '1';
-    if (preview || (!completed && !completedThisSession)) open();
+    if (preview || (!completed && !completedThisSession)) open(!completed);
 })();

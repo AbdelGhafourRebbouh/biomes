@@ -15,10 +15,10 @@ void TrayManager::Remove() { if (available_) Shell_NotifyIconW(NIM_DELETE, &icon
 UINT TrayManager::Menu(HWND owner, bool startup) {
     HMENU menu = CreatePopupMenu();
     if (!menu) return 0;
-    AppendMenuW(menu, MF_STRING, Open, L"Open Biomes");
+    AppendMenuW(menu, MF_STRING, Open, L"Open biomes");
     AppendMenuW(menu, MF_STRING | (startup ? MF_CHECKED : 0), Startup, L"Launch at Windows Startup");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, Exit, L"Exit Biomes");
+    AppendMenuW(menu, MF_STRING, Exit, L"Exit biomes");
     POINT point{}; GetCursorPos(&point); SetForegroundWindow(owner);
     const UINT command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON, point.x, point.y, 0, owner, nullptr);
     DestroyMenu(menu); PostMessageW(owner, WM_NULL, 0, 0);

@@ -1,127 +1,236 @@
-# Biomes
+﻿<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="frontend/logo/logo%20biomes%20white.svg">
+    <img src="frontend/logo/biomes%20logo%20dark.svg" alt="biomes" width="240">
+  </picture>
+</p>
 
-Lightweight Windows desktop workspace manager. Create named layouts ("Biomes"), snap apps into grid zones, then launch or close the whole workspace from a dashboard card or a global hotkey.
+<h3 align="center">Launch your biome. Trigger your routine.</h3>
 
-> **V1 scope:** Matrix Grid Overlay only (Method 1). The Hyprland-style interactive split canvas (Method 2) is intentionally deferred.
+<p align="center">Your apps, in their places. Less setup between you and the work you want to do.</p>
 
-## What works in V1
+<p align="center">
+  <a href="https://github.com/AbdelGhafourRebbouh/biomes/releases"><img src="https://img.shields.io/badge/release-v1.0.0--beta%20in%20preparation-b8a9e6" alt="v1.0.0-beta — release in preparation"></a>
+  <a href="https://github.com/AbdelGhafourRebbouh/biomes/releases"><img src="https://img.shields.io/github/downloads/AbdelGhafourRebbouh/biomes/total?label=Downloads&amp;color=6f8e73" alt="GitHub release downloads"></a>
+  <img src="https://img.shields.io/badge/Windows-10%20%2F%2011-0078D4" alt="Windows 10 and 11">
+  <img src="https://img.shields.io/badge/C%2B%2B-17-00599C" alt="C++17">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPLv3-blue" alt="GNU GPLv3"></a>
+</p>
 
-1. **Create New Biome** — tracked clean slate (no Win+D) + multi-monitor grid overlay  
-2. **Draw zones** — drag rectangles on the grid  
-3. **Enter** — enter snap mode  
-4. **Assign apps** — drag real windows onto zones (hover highlights the target zone)  
-5. **Enter again** — return to the dashboard save dialog  
-6. **Name / hotkey / cover** — save a dashboard card to `config/biomes.json`  
-7. **Launch** — from the card or your hotkey (toggles open/close)  
-8. **Close** — restores biome + minimized non-biome windows to previous positions  
+**biomes** is a free, open-source Windows workspace manager for people with more than one interest. Build a layout for designing, programming, studying, or whatever you want to make time for. Bring it back with a click or a hotkey, and make getting started part of your routine.
 
-Launch keeps already-open biome apps visible, minimizes only other windows, and on close biome apps return to their pre-biome size then minimize (other apps stay minimized). The Biomes dashboard minimizes to the taskbar while a biome is open — click it or press the hotkey again to close.
+![The biomes introduction showing workspace hotkeys](docs/screenshots/onboarding.png)
 
-> **Note:** If zones look misaligned after upgrading, recreate the biome once — overlay and snap now both use the monitor work area (`rcWork`).
+<details>
+<summary>See the Customization page</summary>
 
-## Requirements
+![The biomes Customization page with startup and background controls](docs/screenshots/customization.png)
 
-- Windows 10/11  
-- [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (usually already installed with Edge)  
-- CMake 3.20+  
-- A C++17 compiler (MSVC recommended)
+Screenshots use isolated test profiles, without personal workspace data.
 
-`WebView2Loader.dll` must sit next to the built `Biomes.exe` (CMake copies it automatically on build).
+</details>
 
-## Build
+## 💡 Why biomes? The story
 
-```bash
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-cmake --build build --config Release
+I'm a designer, a programmer, and a student. Each part of my day has its own workspace: a few apps I want open, arranged in the same places.
+
+Before I could start, I kept repeating the same setup. Open the apps. Move the windows. Resize them. Do it all again when switching from a design project to code or studying. Those small steps took time and made it easier to get distracted or move to another task before I'd really begun.
+
+I built biomes to remove that friction. A biome is a familiar place for one part of your life. Set it up once, then return to it when you're ready to work. The idea is to make organizing your screen easier and help build the habit of starting—not to tell you how to spend your time.
+
+biomes is free and open source. Your workspace layouts and settings stay on your computer. No account is required to manage your workspaces.
+
+## ✨ Features
+
+### Workspace management
+
+- **One-click activation:** reopen missing apps and place available windows into saved grid zones.
+- **A layout for every interest:** name your biomes, choose covers, and give each workspace its own hotkey.
+- **Multi-monitor layouts:** save relative window bounds and layout variants for different display setups. Recalculate placement when resolution, work area, or DPI changes.
+- **Disconnected-display handling:** skip zones on missing monitors rather than silently moving them onto the wrong display. Layout repair is available separately.
+- **Session-aware placement:** track previous window positions and restore them where possible when closing a biome. Applications remain open.
+
+### System integration
+
+- **Global hotkeys:** activate a biome while working in another app.
+- **System tray:** keep the background engine available when the dashboard is hidden.
+- **Optional Windows startup:** enable per-user startup and background hotkeys from Customization.
+- **Native app launching:** support ordinary desktop apps, Microsoft Store activation identities, and Obsidian vault links.
+- **Local storage:** layouts, settings, logs, images, and the WebView2 profile live under `%LOCALAPPDATA%\biomes\`.
+
+### Engine resilience
+
+- **15-second launch watchdog:** report an app that fails to expose a usable window instead of leaving a spinner running indefinitely.
+- **Asynchronous window tracking:** watch for new and replacement windows without blocking the dashboard.
+- **WebView2 recovery:** attempt to recreate a failed UI controller while keeping the background engine alive and preserving its profile.
+- **Per-user installation:** install without administrator elevation. Ordinary uninstall removes app files and shortcuts while preserving your biomes data.
+
+**Privacy boundary:** workspace management is local. Optional community links and newsletter signup use external services; newsletter signup sends the submitted form data. Microsoft WebView2 installation and updates also use Microsoft's services.
+
+### Make your first biome
+
+1. Choose **Create New Biome** and draw zones on your monitors.
+2. Press **Enter** to enter snap mode, then drag your open application windows onto the zones.
+3. Press **Enter** again and save a name, cover, and optional hotkey such as `CTRL+ALT+C`.
+4. Activate the biome from its card or hotkey. Trigger it again to close the session.
+
+Closing the dashboard keeps biomes in the tray. Use **Exit biomes** to end the background process.
+
+## 🛠️ Architecture & tech stack
+
+| Component | Technology | Responsibility |
+| --- | --- | --- |
+| Native engine | C++17 and Win32 | App launching, window placement, display topology, hotkeys, and tray lifetime |
+| Dashboard and launch panel | Microsoft WebView2, HTML, CSS, JavaScript | Workspace UI, onboarding, settings, and launch progress |
+| IPC bridge | JSON messages over WebView2 | Route UI requests and return native state and events |
+| Persistence | Local JSON; nlohmann/json | Workspace layouts, topology variants, and native settings |
+| Build | CMake and MSVC | Native compilation, resource embedding, asset copying, and regression tests |
+| Distribution | PowerShell and Inno Setup | ZIP packaging, per-user installer, and WebView2 Evergreen bootstrapper |
+
+```mermaid
+flowchart TD
+    UI[WebView2 dashboard] -->|JSON requests| IPC[Native IPC bridge]
+    IPC -->|JSON results and events| UI
+    IPC --> Engine[Native orchestration]
+    Host[BackgroundHost: tray and hotkeys] -->|Queued actions| Engine
+    Engine --> Windows[WindowScaler and AppLauncher]
+    Engine --> Monitors[MonitorManager]
+    Engine --> Storage[JsonManager and NativeSettings]
+    Windows -->|Asynchronous launch progress| IPC
+    Monitors -->|Monitor changes| IPC
+    Storage --> Files[Local user data]
+    Engine --> Panel[WebView2 launch panel]
 ```
 
-Run:
+The hidden native host owns process lifetime. Closing or recovering the dashboard does not end the background engine. WinEvent hooks and periodic checks discover application windows and verify placement after launch.
 
-```bash
-.\build\Release\Biomes.exe
+See [AGENTS.md](AGENTS.md) for the detailed architecture and contributor instructions. Source code and tests are authoritative.
+
+## 🤖 AI co-development workflow
+
+I use **Codex**, with some **Cursor**, as part of developing biomes. AI has helped me research Windows APIs, investigate bugs, fix errors, organize code, write code comments and commit messages, and refine the interface and build scripts.
+
+A workspace manager has to interact with applications built using very different technologies. A traditional Win32 app, an Electron app, and a Microsoft Store app can behave differently when launched, resized, minimized, or restored. Making those cases work has meant a lot of research into Win32 and a lot of testing.
+
+AI helps me explore those problems and iterate on possible fixes. The design direction and responsibility for the project remain mine. Suggested changes still need to be checked against the implementation, regression tests, and real application behavior. biomes itself does not require an AI model or AI service to run.
+
+## ⬇️ Download & installation
+
+**v1.0.0-beta is being prepared for publication. A GitHub release has not been published yet.**
+
+- [Release page](https://github.com/AbdelGhafourRebbouh/biomes/releases)
+- [Planned direct installer link](https://github.com/AbdelGhafourRebbouh/biomes/releases/download/v1.0.0-beta/biomesSetup-v1.0.0-beta.exe) — available after the `v1.0.0-beta` release and its installer asset are uploaded.
+
+### Requirements
+
+- **Windows 10 or Windows 11, 64-bit (x64).**
+- **Microsoft WebView2 Evergreen Runtime.** Setup includes Microsoft's bootstrapper for machines where the runtime is missing; that installation requires internet access.
+
+Run `biomesSetup-v1.0.0-beta.exe` and follow the installer. It installs per user under `%LOCALAPPDATA%\Programs\biomes`, creates a Start Menu shortcut, and offers an optional Desktop shortcut.
+
+The beta installer is currently **unsigned**, so Windows may show an unknown-publisher or SmartScreen warning. Code signing is a funding priority. Download from this repository's releases and use the accompanying SHA-256 file to check the downloaded file.
+
+Before upgrading, exit the running app through its tray menu. Your personal data under `%LOCALAPPDATA%\biomes\` is preserved during ordinary upgrades and uninstall. See [RELEASE.md](RELEASE.md) for ZIP deployment and bootstrapper details.
+
+## 🔨 Building from source
+
+Install **Git**, **Visual Studio 2022** with the **Desktop development with C++** workload and Windows SDK, and **CMake 3.20+**. WebView2 Runtime is needed to run the app and its UI tests. The JSON and WebView2 headers are included in the repository; the frontend needs no Node.js build.
+
+From a Visual Studio developer PowerShell:
+
+```powershell
+git clone https://github.com/AbdelGhafourRebbouh/biomes.git
+cd biomes
+cmake -S . -B build-stability -G "Visual Studio 17 2022" -A x64 -DBIOMES_BUILD_TESTS=ON
+cmake --build build-stability --config Release --parallel 4
+ctest --test-dir build-stability -C Release --output-on-failure --no-tests=error
+.\build-stability\Release\Biomes.exe
 ```
 
-The build copies `index.html` and `WebView2Loader.dll` into the output folder. Saved Biomes live in:
+If using another supported Visual Studio version, select its installed CMake generator. The build copies the frontend, fonts, images, and `WebView2Loader.dll` beside the executable. Exit any older running instance before rebuilding or checking UI changes.
+
+### Create the installer
+
+Install **Inno Setup 6**, then run:
+
+```powershell
+.\scripts\build_installer.ps1
+# Or specify your compiler location:
+.\scripts\build_installer.ps1 -IsccPath "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+```
+
+This builds and tests Release, packages the allowlisted files, and writes `dist\biomesSetup-v1.0.0-beta.exe` and its checksum. To create only the ZIP, run `.\scripts\package_release.ps1`. Both scripts accept `-BootstrapperPath` for a previously downloaded Microsoft-signed WebView2 bootstrapper.
+
+### Additional checks
+
+The 13 native regression suites cover IPC, WebView2 recovery and responsive onboarding, persistence, monitor resolution, placement, launch tracking, storage, and background lifetime.
+
+```powershell
+# Optional: Node.js with built-in WebSocket support, plus Microsoft Edge.
+node tests/onboarding_tests.mjs
+# Optional: Google Chrome; uses temporary profiles.
+.\scripts\test_chrome_launch.ps1
+```
+
+Real-world checks still matter: mixed-DPI displays, disconnected monitors, global hotkeys, slow apps, session cancellation, and installer upgrades cannot be fully represented by automated fixtures.
+
+## 📂 Project structure
 
 ```text
-%LOCALAPPDATA%/biomes/config/biomes.json
+biomes/
+├── src/                 C++ implementations; main.cpp orchestrates the app
+│   ├── core/            Launching, placement, monitors, storage, IPC, and lifetime
+│   └── ui/              WebView2 hosts, grid overlay, launch panel, and tray
+├── include/             Core/UI headers and vendored dependencies
+├── frontend/            Shipped HTML, CSS, JavaScript, fonts, and artwork
+├── resources/           Icon, manifest, and version resources
+├── installer/           Inno Setup configuration and installer notes
+├── scripts/             Packaging automation and Chrome launch smoke test
+├── tests/               Regression suites and launch-panel preview harness
+├── tools/               Optional icon generation tool
+├── docs/screenshots/    Screenshots used by this README
+├── CMakeLists.txt       Build, asset copying, and test registration
+├── AGENTS.md            Architecture and contributor instructions
+├── RELEASE.md           Deployment guide
+└── LICENSE              GNU GPLv3
 ```
 
-## Release packaging
+Generated builds, temporary browser profiles, and distribution binaries are excluded from Git.
 
-See [RELEASE.md](RELEASE.md) for ZIP deployment and the bundled WebView2 Evergreen bootstrapper. Run `.\scripts\package_release.ps1` to build, test, and package under `dist/`.
+## 🗺️ Roadmap & cross-platform vision
 
-## Hotkeys
+- [x] Windows workspace layouts, multi-monitor grids, tray lifetime, and global hotkeys.
+- [x] Local persistence, launch progress, UI recovery, and per-user beta installer.
+- [ ] Publish v1.0.0-beta and improve compatibility from real-world feedback.
+- [ ] Fund Windows code signing.
+- [ ] Continue accessibility, display-scaling, and application-compatibility improvements.
+- [ ] Explore a macOS version using WKWebView and native window-management APIs.
+- [ ] Explore Linux support using WebKitGTK and desktop-specific window-management APIs.
 
-Use modifier + key, for example:
+**Windows is the only supported platform today.** macOS and Linux are a longer-term direction, not existing ports or promised release dates. Replacing WebView2 alone would not port the native window engine.
 
-- `CTRL+ALT+C`
-- `CTRL+SHIFT+1`
+### Current beta limits
 
-Hotkeys require at least one modifier (`CTRL`, `ALT`, `SHIFT`, or `WIN`) plus a letter/number. The same hotkey **toggles** the Biome open/closed.
+Some applications reject resizing or need user interaction before they expose a usable window. Microsoft Store apps should be assigned through their real application window; `ApplicationFrameHost.exe` alone is not a launchable identity. Obsidian requires an identifiable vault.
 
-## Project layout
+New Chrome windows use Chrome's last-used profile; per-zone browser account and tab restoration are not implemented. Closing a biome restores tracked placement where possible and minimizes its windows rather than terminating the applications.
 
-```text
-src/main.cpp              IPC router, activate/close, hotkey wiring
-src/ui/grid_overlay.cpp   Multi-monitor grid overlay (Method 1)
-src/ui/webview_window.cpp WebView2 dashboard host
-src/core/window_scaler.cpp Snap / launch / restore windows
-src/core/app_launcher.cpp Store (AUMID) and Obsidian URI launch
-src/core/json_manager.cpp Biome persistence (biomes.json v2)
-src/core/monitor_manager.cpp Monitor rcWork enumeration
-src/core/hotkey_manager.cpp Global hotkey parse + register
-index.html                Dashboard UI (shipped with exe)
-docs/ARCHITECTURE.md      Architecture reference
-frontend/README.md        Deferred Vite/React UI (not used in V1)
-```
+## ☕ Community support & funding
 
-See `docs/ARCHITECTURE.md` for the full module map and session model.
+biomes is independently built by [Abdelghafour Rebbouh](https://github.com/AbdelGhafourRebbouh). If it saves you time or helps you start your work, you can [support development on Ko-fi](https://ko-fi.com/abdelghafourrebbouh).
 
-## Known limitations (V1)
+Funding priorities:
 
-- **UWP frame hosts** saved as `ApplicationFrameHost.exe` cannot be relaunched reliably — use the real Store app window (e.g. Spotify) so Biomes captures its AUMID.
-- **Microsoft Store apps** must be assigned while open during create; Biomes activates them via AUMID, not the `WindowsApps` exe path.
-- **Obsidian** requires the target vault to be open when you snap the zone; cold start uses `obsidian://open?vault=...` from the title / Obsidian config (never the version string, never the vault picker).
-- **Multi-window apps** (Chrome, VS Code): each zone needs its own open window; Biomes will launch a new process window when one is missing.
-- Hotkeys need a modifier + key (`CTRL+ALT+C`), not a bare letter.
-- Closing a Biome restores window positions Biomes tracked during that session.
+| Priority | What support would help cover |
+| --- | --- |
+| Windows code signing | Signing the installer and application to establish publisher identity |
+| Domain and hosting | A project home and distribution/CDN costs as the project grows |
+| Cross-platform development | Hardware, testing, and research for possible macOS and Linux versions |
 
-## Placement reliability checklist
+These are goals, not announced funding amounts or delivery commitments. You can also help by reporting reproducible bugs, testing different applications and monitor setups, improving documentation, or contributing fixes.
 
-Before a public share, verify:
+[Open an issue](https://github.com/AbdelGhafourRebbouh/biomes/issues) with your Windows version, display setup, affected app, and reproduction steps. Keep personal workspace data and sensitive logs out of public reports.
 
-**Basic:** app not running launches into zone; already-open app reuses window; close restores positions; unrelated apps restore; dashboard untouched.
+## 📄 License
 
-**Multi-window (Chrome x2):** one zone takes one HWND; two zones never share; closing the snapped Chrome then reopening the biome launches a **new** window instead of stealing the other account; both Chromes restore when left open.
-
-**Missing/slow:** bad path fails that zone only; UWP/`ApplicationFrameHost` skipped clearly; slow apps wait for a **new** HWND; partial success opens biome when some zones place.
-
-**Store (Spotify):** assign while open (AUMID saved); launch via AUMID without error dialog; recreate old biomes after upgrading.
-
-**Obsidian:** assign with vault open (`launchUri` saved); cold start opens vault via URI; never vault picker from Biomes.
-
-**Electron:** VS Code / Discord place when open or launched.
-
-**Monitors / hotkey:** primary + secondary zones; unplug fallback; card and hotkey toggle match; no double-hotkey corruption.
-
-**Create flow:** overlay saves path + exe + titleHint + aumid/launchUri; relaunch uses binding after Chrome updates (exe name match).
-
-## Feedback welcome
-
-This is an early public V1. Useful feedback areas:
-
-- Overlay UX while drawing / snapping windows  
-- Launch reliability for UWP / Store apps  
-- Hotkey conflicts and discoverability  
-- Multi-monitor edge cases  
-
-Please open an issue with your Windows version, monitor setup, and what you expected vs what happened.
-
-## support biomes
-
-[![Sponsor on Ko-fi](https://img.shields.io/badge/Sponsor-Ko--fi-ff5e5b?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/abdelghafourrebbouh)
-
-## License
-
-See [LICENSE](LICENSE).
+biomes is free and open-source software under the **GNU General Public License v3.0**. See [LICENSE](LICENSE) for the full terms. Third-party dependencies retain their own notices and licenses.

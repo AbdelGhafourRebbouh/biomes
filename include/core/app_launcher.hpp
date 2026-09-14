@@ -3,14 +3,24 @@
 #include <windows.h>
 #include <string>
 #include <vector>
+#include <filesystem>
 
 struct SelectedBox;
 
 class AppLauncher {
 public:
     static bool IsPackagedAppPath(const std::string& path);
+    // Desktop taskbar IDs (for example "Chrome") are not Store activation IDs.
+    static bool RequiresPackagedActivation(const SelectedBox& box,
+                                          const std::string& resolvedPath = "");
 
     static bool IsObsidianExe(const std::string& exeOrPath);
+    static bool IsChromeExe(const std::string& exeOrPath);
+    static bool IsChromeProfilePicker(const std::string& exeOrPath, const std::string& title);
+    // Read only Chrome's last-used profile directory, never account credentials.
+    static std::string ResolveChromeProfileDirectory(const std::filesystem::path& userDataDirectory = {});
+    static std::string DesktopLaunchArguments(const std::string& exeOrPath,
+                                              const std::string& chromeProfile = "");
 
     // Electron / Chromium hosts that can hang if snapped too aggressively.
     static bool IsFragileElectronHost(const std::string& exeOrPath);

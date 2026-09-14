@@ -45,7 +45,7 @@ try {
     }
     & $IsccPath "/DPackageDir=$stage" "/DOutputDir=$dist" (Join-Path $root 'installer/BiomesSetup.iss')
     if ($LASTEXITCODE) { throw "Inno Setup compilation failed: $LASTEXITCODE" }
-    $installer = Join-Path $dist "BiomesSetup-v$version.exe"
+    $installer = Join-Path $dist "biomesSetup-v$version.exe"
     if (-not (Test-Path -LiteralPath $installer)) { throw 'Installer output missing.' }
     $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
     "$hash  $([IO.Path]::GetFileName($installer))" | Set-Content -LiteralPath "$installer.sha256" -Encoding ASCII

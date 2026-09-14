@@ -333,13 +333,6 @@ h1 { margin:0; font:500 24px/1.2 "Fredoka",sans-serif; letter-spacing:-.4px; }
 .native-preferences label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .native-preferences input { accent-color: var(--text-primary); }
 
-/* Reserve the drawer footprint so the support navigation never jumps. */
-.native-preferences-slot { height:94px; flex:none; }
-.native-preferences-accordion { display:grid; grid-template-rows:1fr; transition:grid-template-rows 200ms cubic-bezier(.2,.8,.2,1); }
-.native-preferences-clip { min-height:0; overflow:hidden; }
-.native-preferences { width:190px; opacity:1; transform:translateY(0); transition:opacity 200ms cubic-bezier(.2,.8,.2,1),transform 200ms cubic-bezier(.2,.8,.2,1); }
-.is-sidebar-collapsed .native-preferences-accordion { grid-template-rows:0fr; }
-.is-sidebar-collapsed .native-preferences { opacity:0; transform:translateY(-6px); pointer-events:none; }
 .beta-badge { display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; padding:4px 7px; border:1px solid #7773; border-radius:999px; background:#ddd6ff; color:#45306e; font-size:9px; font-weight:600; line-height:1; letter-spacing:.08em; backdrop-filter:blur(8px); white-space:nowrap; }
 [data-theme="dark"] .beta-badge { background:#c5afff20; color:#e4d7ff; border-color:#c5afff40; }
 .brand-logo { width:122px; }
@@ -349,3 +342,31 @@ h1 { margin:0; font:500 24px/1.2 "Fredoka",sans-serif; letter-spacing:-.4px; }
 [data-theme="dark"] .card-beta { background:#282331d9; color:#f1eaff; }
 
 @media (max-height:720px) { .sidebar-bottom { padding-top:16px; } }
+
+.settings-page { max-width:880px; margin:30px auto 24px; animation:card-arrive 300ms ease both; }
+.settings-page[hidden] { display:none; }
+/* Match Privacy's image-container sizing context without changing Privacy. */
+.settings-banner { container-type:inline-size; }
+.settings-intro > p:last-child { margin:0; color:var(--text-muted); font-size:15px; line-height:1.8; }
+.settings-page .native-preferences { max-width:680px; margin:28px auto 0; gap:0; padding:20px 24px; border:1px solid var(--border-divider); border-radius:20px; background:var(--bg-edge); }
+.settings-page .native-preferences p { margin:0; color:var(--text-muted); font-size:13px; line-height:1.8; }
+.settings-card-heading > p { font-size:14px; }
+.setting-row { padding-top:22px; }
+.setting-row + .setting-row { margin-top:20px; border-top:1px solid var(--border-divider); }
+.settings-page .setting-row label { display:flex; justify-content:space-between; gap:16px; font-size:14px; font-weight:600; }
+.setting-row input { order:1; flex-shrink:0; width:17px; height:17px; margin:0; cursor:pointer; }
+.setting-row input:focus-visible { outline:2px solid var(--text-primary); outline-offset:4px; }
+.settings-page .setting-row p { margin-top:6px; padding-right:32px; }
+.settings-card-footer { margin-top:22px; padding-top:14px; border-top:1px solid var(--border-divider); color:var(--text-muted); font-size:12px; }
+.settings-page #background-settings-status:empty { display:none; }
+.settings-page #background-settings-status:not(:empty) { margin-top:6px; }
+@container (max-width:480px) {
+    .settings-page .native-preferences { padding:20px; }
+    .settings-page .setting-row p { padding-right:0; }
+}
+/* Shared attention card geometry (also used by the native launch panel). */
+.error-card .content { display:flex; flex-direction:column; padding:20px; gap:20px; }
+.error-card .symbol,.error-card .actions,.error-card .landscape { margin:0; }
+.error-card .symbol { align-self:center; flex-shrink:0; }
+.error-card .landscape { overflow:hidden; border-radius:16px; }
+.error-card .landscape img { display:block; width:100%; height:100%; object-fit:cover; border-bottom-left-radius:16px; border-bottom-right-radius:16px; }

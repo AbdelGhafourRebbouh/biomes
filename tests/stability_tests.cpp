@@ -124,6 +124,56 @@ int main() {
     wc.lpszClassName = L"BiomesStabilityFixture";
     RegisterClassW(&wc);
     try {
+        SelectedBox desktop;
+        desktop.assignedApp = R"(C:\Program Files\Google\Chrome\Application\chrome.exe)";
+        desktop.exeName = "chrome.exe";
+        desktop.aumid = "Chrome";
+        Require(AppLauncher::DesktopLaunchArguments(desktop.assignedApp) == "--new-window chrome://newtab/",
+                "Chrome explicitly opens a separate new-tab window");
+        Require(AppLauncher::DesktopLaunchArguments("CHROME.EXE") == "--new-window chrome://newtab/",
+                "Chrome launch arguments are case insensitive");
+        Require(AppLauncher::DesktopLaunchArguments("other.exe").empty(), "other desktop launches keep their arguments");
+        const auto chromeRoot = biomes::AppPaths::Root() / "chrome-fixture";
+        filesystem::create_directories(chromeRoot / "Default");
+        filesystem::create_directories(chromeRoot / "Profile 1");
+        const auto writeChromeState = [&](const string& contents) {
+            ofstream file(chromeRoot / "Local State", ios::binary | ios::trunc);
+            file << contents;
+        };
+        writeChromeState(R"({"profile":{"last_used":"Profile 1","info_cache":{"Default":{},"Profile 1":{}}}})");
+        Require(AppLauncher::ResolveChromeProfileDirectory(chromeRoot) == "Profile 1", "two-profile Chrome uses last-used directory");
+        Require(AppLauncher::DesktopLaunchArguments("chrome.exe", AppLauncher::ResolveChromeProfileDirectory(chromeRoot)) ==
+                "--new-window --profile-directory=\"Profile 1\" chrome://newtab/", "profile directory with spaces quoted for both launch routes");
+        writeChromeState(R"({"profile":{"last_used":"Default","info_cache":{"Default":{},"Profile 1":{}}}})");
+        Require(AppLauncher::ResolveChromeProfileDirectory(chromeRoot) == "Default", "last-used Default respected with multiple accounts");
+        writeChromeState("{broken");
+        Require(AppLauncher::ResolveChromeProfileDirectory(chromeRoot).empty(), "corrupt Chrome metadata falls back safely");
+        writeChromeState(R"({"profile":{"last_used":"Profile 9","info_cache":{"Profile 9":{}}}})");
+        Require(AppLauncher::ResolveChromeProfileDirectory(chromeRoot).empty(), "missing profile never created implicitly");
+        writeChromeState(R"({"profile":{"last_used":"../outside","info_cache":{"../outside":{}}}})");
+        Require(AppLauncher::ResolveChromeProfileDirectory(chromeRoot).empty(), "profile path traversal rejected");
+        Require(AppLauncher::DesktopLaunchArguments("chrome.exe", "Default\" --incognito") ==
+                "--new-window chrome://newtab/", "profile metadata cannot inject switches");
+        writeChromeState(string(4 * 1024 * 1024 + 1, ' '));
+        Require(AppLauncher::ResolveChromeProfileDirectory(chromeRoot).empty(), "oversized Chrome metadata bounded");
+        Require(AppLauncher::IsChromeProfilePicker("chrome.exe", "Google Chrome"), "Chrome chooser is transient");
+        Require(AppLauncher::IsChromeProfilePicker("chrome.exe", ""), "untitled Chrome startup waits");
+        Require(!AppLauncher::IsChromeProfilePicker("chrome.exe", "New Tab - Google Chrome"), "Chrome browser is usable");
+        Require(!AppLauncher::IsChromeProfilePicker("other.exe", "Google Chrome"), "chooser title is scoped to Chrome");
+        Require(!AppLauncher::RequiresPackagedActivation(desktop), "saved Chrome taskbar ID uses executable launch");
+        Require(!AppLauncher::RequiresPackagedActivation(desktop, desktop.assignedApp), "resolved Chrome path stays desktop");
+        desktop.aumid = "Chrome.Profile.1";
+        Require(!AppLauncher::RequiresPackagedActivation(desktop), "desktop profile taskbar ID stays desktop");
+        desktop.aumid = "";
+        Require(!AppLauncher::RequiresPackagedActivation(desktop), "legacy desktop zone without identity");
+        desktop.aumid = "Package_8wekyb3d8bbwe!App";
+        Require(AppLauncher::RequiresPackagedActivation(desktop), "packaged activation identity preserved");
+        desktop.aumid = "Chrome";
+        desktop.assignedApp = R"(C:\Program Files\WindowsApps\Package\app.exe)";
+        Require(AppLauncher::RequiresPackagedActivation(desktop), "invalid Store identity never falls through to executable");
+        desktop.assignedApp = "app.exe";
+        Require(AppLauncher::RequiresPackagedActivation(desktop, R"(C:\Program Files\WindowsApps\Package\app.exe)"), "resolved Store path stays protected");
+
         // Physical geometry is independent of logical DPI and supports negative origins.
         for (LONG scale : {1L, 2L, 3L}) {
             work = {-12000, -12000, -12000 + 1280 * scale, -12000 + 720 * scale};
@@ -226,6 +276,30 @@ int main() {
         Require(g_pendingSnaps.front().snappedHwnd == second, "replacement workspace follows destroyed window");
         Reset();
 
+        // Two Chrome zones may produce identical tabs in the same process.
+        // The chooser must never be snapped or marked ready, including when
+        // its replacement has a different HWND after account selection.
+        first = Window(L"Google Chrome", true);
+        auto chromePending = Pending("Google Chrome");
+        chromePending.exeName = "chrome.exe";
+        chromePending.deadline = GetTickCount64() + 15000;
+        g_pendingSnaps.push_back(chromePending);
+        SettleCandidate();
+        Require(!g_pendingSnaps.front().snappedHwnd && g_placementChecks.empty(), "Chrome picker never completes a zone");
+        Require(g_pendingSnaps.front().deadline == chromePending.deadline, "picker does not extend launch watchdog");
+        DestroyWindow(first);
+        first = Window(L"New Tab - Google Chrome", true);
+        second = Window(L"New Tab - Google Chrome", true);
+        chromePending.id = ++g_nextPendingId;
+        chromePending.box.id = 2;
+        g_pendingSnaps.push_back(chromePending);
+        SettleCandidate(); SettleCandidate();
+        Require(g_pendingSnaps[0].snappedHwnd && g_pendingSnaps[1].snappedHwnd &&
+                g_pendingSnaps[0].snappedHwnd != g_pendingSnaps[1].snappedHwnd,
+                "two identical Chrome tabs fill distinct zones after chooser disappears");
+        Require(g_pendingClaimedWindows.size() == 2, "Chrome windows claimed exactly once");
+        Reset();
+
         hwnd = Window(L"Welcome", true);
         g_pendingSnaps.push_back(Pending("Welcome")); SettleCandidate();
         Require(g_pendingSnaps.front().provisionalWindow, "welcome remains provisionally tracked");
@@ -278,6 +352,23 @@ int main() {
             nullptr, nullptr, GetModuleHandle(nullptr), nullptr);
         Require(chooser != nullptr, "create native chooser fixture"); owned.push_back(chooser);
         Require(!IsWorkspaceCandidate(chooser), "native project dialog is not the workspace");
+        Reset();
+
+        auto timedOut = Pending("hung-worker");
+        timedOut.box.assignedApp = timedOut.fullPath;
+        timedOut.deadline = GetTickCount64() - 1;
+        auto hungResult = std::make_shared<LaunchResult>();
+        g_pendingSnaps = {timedOut};
+        g_launchJobs = {{timedOut.id, hungResult}};
+        WindowScaler::BeginLaunchProgress("timeout", {timedOut.box});
+        WindowScaler::FinishLaunchSetup();
+        ProcessPendingSnaps();
+        Require(g_pendingSnaps.empty() && hungResult->cancelled.load(), "watchdog cancels tracking before worker returns");
+        Require(g_launchProgress.Snapshot()["state"] == "partial", "watchdog clears spinner");
+        Require(g_launchProgress.Snapshot()["items"][0]["detail"] == "Application took too long to launch or is waiting for user input.", "watchdog error text");
+        hungResult->success = true; hungResult->done = true;
+        ProcessPendingSnaps();
+        Require(g_pendingSnaps.empty(), "late worker cannot resurrect timed out launch");
         Reset();
 
         hwnd = Window(L"ready", true);
