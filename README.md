@@ -1,4 +1,5 @@
-﻿<p align="center">
+# biomes
+ <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="frontend/logo/logo%20biomes%20white.svg">
     <img src="frontend/logo/biomes%20logo%20dark.svg" alt="biomes" width="240">
