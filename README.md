@@ -5,21 +5,37 @@
   </picture>
 </p>
 
+<h1 align="center">biomes: Windows workspace manager and window grid layout tool</h1>
+
 <h3 align="center">Launch your biome. Trigger your routine.</h3>
 
 <p align="center">Your apps, in their places. Less setup between you and the work you want to do.</p>
 
 <p align="center">
-  <a href="https://github.com/AbdelGhafourRebbouh/biomes/releases"><img src="https://img.shields.io/badge/release-v1.0.0--beta%20in%20preparation-b8a9e6" alt="v1.0.0-beta — release in preparation"></a>
+  <a href="https://github.com/AbdelGhafourRebbouh/biomes/releases/tag/v1.0.0-beta"><img src="https://img.shields.io/badge/release-v1.0.0--beta-b8a9e6" alt="v1.0.0-beta — published prerelease"></a>
   <a href="https://github.com/AbdelGhafourRebbouh/biomes/releases"><img src="https://img.shields.io/github/downloads/AbdelGhafourRebbouh/biomes/total?label=Downloads&amp;color=6f8e73" alt="GitHub release downloads"></a>
   <img src="https://img.shields.io/badge/Windows-10%20%2F%2011-0078D4" alt="Windows 10 and 11">
   <img src="https://img.shields.io/badge/C%2B%2B-17-00599C" alt="C++17">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPLv3-blue" alt="GNU GPLv3"></a>
 </p>
 
+<p align="center">
+  <a href="https://biomes-one.vercel.app/">Website</a> ·
+  <a href="https://github.com/AbdelGhafourRebbouh/biomes/releases/tag/v1.0.0-beta">Download beta for Windows</a> ·
+  <a href="https://biomes-one.vercel.app/assets/biomes-demo.mp4">Watch the demo (video)</a>
+</p>
+
 **biomes** is a free, open-source Windows workspace manager for people with more than one interest. Build a layout for designing, programming, studying, or whatever you want to make time for. Bring it back with a click or a hotkey, and make getting started part of your routine.
 
-![The biomes introduction showing workspace hotkeys](docs/screenshots/onboarding.png)
+Save and restore window layouts, snap windows to a grid, and keep separate multi-monitor workspaces for each activity. With a saved biome, you can launch apps and arrange them with a hotkey instead of rebuilding your desktop every time.
+
+### See biomes in action
+
+[![Watch the biomes demo — workspace hotkeys and saved layouts](docs/screenshots/onboarding.png)](https://biomes-one.vercel.app/assets/biomes-demo.mp4)
+
+**[Watch the demo video](https://biomes-one.vercel.app/assets/biomes-demo.mp4)** · [Visit the biomes website](https://biomes-one.vercel.app/)
+
+The image above is a screenshot linked to the video, not an animated preview.
 
 <details>
 <summary>See the Customization page</summary>
@@ -76,6 +92,19 @@ biomes is free and open source. Your workspace layouts and settings stay on your
 
 Closing the dashboard keeps biomes in the tray. Use **Exit biomes** to end the background process.
 
+## biomes vs FancyZones, komorebi, and PowerToys
+
+Looking for a FancyZones alternative or comparing Windows workspace managers? These tools overlap, but focus on different workflows. **FancyZones is part of PowerToys**, and PowerToys also includes a separate **Workspaces** utility that launches saved app arrangements.
+
+| Tool | Main purpose | Layout and launch workflow | Where biomes differs |
+| --- | --- | --- | --- |
+| **biomes** | Saved, named workspaces for different activities | Draw grid zones, assign apps, then activate the workspace with a card or global hotkey | A dedicated visual workspace library with covers, per-biome hotkeys, topology variants, and session-aware placement |
+| [FancyZones (PowerToys)](https://learn.microsoft.com/en-us/windows/powertoys/fancyzones) | Snap individual windows into custom zones | Arrange windows with dragging or keyboard shortcuts; remember zone assignments | biomes pairs zones with app launch targets and activates the saved group, rather than focusing only on snapping windows |
+| [komorebi](https://github.com/LGUG2Z/komorebi) | Tiling window management | Control windows, virtual workspaces, and monitors through configuration and a CLI, with shortcut integrations | biomes focuses on explicitly launching saved app-and-zone arrangements through a visual dashboard, rather than a tiling-manager workflow |
+| [PowerToys Workspaces](https://learn.microsoft.com/en-us/windows/powertoys/workspaces) | Capture and relaunch desktop arrangements within the PowerToys suite | Capture app positions, configure launch arguments, and launch a workspace with a click or desktop shortcut | biomes starts with drawn grid zones and adds its own card library, per-biome global hotkeys, and session-close behavior |
+
+PowerToys Workspaces already supports launching and positioning groups of apps; this is not exclusive to biomes. Choose based on whether you prefer zone snapping, tiling, captured desktop arrangements, or biomes' saved grid-based routines. All workspace tools remain subject to individual apps' launch and resizing behavior.
+
 ## 🛠️ Architecture & tech stack
 
 | Component | Technology | Responsibility |
@@ -116,10 +145,11 @@ AI helps me explore those problems and iterate on possible fixes. The design dir
 
 ## ⬇️ Download & installation
 
-**v1.0.0-beta is being prepared for publication. A GitHub release has not been published yet.**
+**v1.0.0-beta is available as a published prerelease for Windows x64.**
 
-- [Release page](https://github.com/AbdelGhafourRebbouh/biomes/releases)
-- [Planned direct installer link](https://github.com/AbdelGhafourRebbouh/biomes/releases/download/v1.0.0-beta/biomesSetup-v1.0.0-beta.exe) — available after the `v1.0.0-beta` release and its installer asset are uploaded.
+- [Download the Windows installer](https://github.com/AbdelGhafourRebbouh/biomes/releases/download/v1.0.0-beta/biomesSetup-v1.0.0-beta.exe)
+- [v1.0.0-beta release notes](https://github.com/AbdelGhafourRebbouh/biomes/releases/tag/v1.0.0-beta)
+- [All releases](https://github.com/AbdelGhafourRebbouh/biomes/releases) · [Project website](https://biomes-one.vercel.app/)
 
 ### Requirements
 
@@ -128,9 +158,13 @@ AI helps me explore those problems and iterate on possible fixes. The design dir
 
 Run `biomesSetup-v1.0.0-beta.exe` and follow the installer. It installs per user under `%LOCALAPPDATA%\Programs\biomes`, creates a Start Menu shortcut, and offers an optional Desktop shortcut.
 
-The beta installer is currently **unsigned**, so Windows may show an unknown-publisher or SmartScreen warning. Code signing is a funding priority. Download from this repository's releases and use the accompanying SHA-256 file to check the downloaded file.
+The beta installer is currently **unsigned**, so Windows may show an unknown-publisher or SmartScreen warning. Code signing is a funding priority. Download from this repository's releases. When a release includes a SHA-256 checksum, use it to verify the downloaded file; the current beta release does not include a separate checksum asset.
 
 Before upgrading, exit the running app through its tray menu. Your personal data under `%LOCALAPPDATA%\biomes\` is preserved during ordinary upgrades and uninstall. See [RELEASE.md](RELEASE.md) for ZIP deployment and bootstrapper details.
+
+### WinGet and Scoop
+
+Use the GitHub installer above for now. Verified WinGet and Scoop package IDs are not documented yet; install commands will be added after package manifests are published and validated. The similarly named **Biome/BiomeJS** packages are a different project, not this Windows workspace manager.
 
 ## 🔨 Building from source
 
@@ -201,7 +235,9 @@ Generated builds, temporary browser profiles, and distribution binaries are excl
 
 - [x] Windows workspace layouts, multi-monitor grids, tray lifetime, and global hotkeys.
 - [x] Local persistence, launch progress, UI recovery, and per-user beta installer.
-- [ ] Publish v1.0.0-beta and improve compatibility from real-world feedback.
+- [x] Publish [v1.0.0-beta](https://github.com/AbdelGhafourRebbouh/biomes/releases/tag/v1.0.0-beta) for Windows x64.
+- [ ] Improve beta compatibility from real-world feedback.
+- [ ] Publish and validate WinGet and/or Scoop manifests, then document installation commands.
 - [ ] Fund Windows code signing.
 - [ ] Continue accessibility, display-scaling, and application-compatibility improvements.
 - [ ] Explore a macOS version using WKWebView and native window-management APIs.
