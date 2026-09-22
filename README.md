@@ -1,4 +1,4 @@
-﻿<p align="center">
+<p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="frontend/logo/logo%20biomes%20white.svg">
     <img src="frontend/logo/biomes%20logo%20dark.svg" alt="biomes" width="240">
@@ -147,7 +147,15 @@ AI helps me explore those problems and iterate on possible fixes. The design dir
 
 **v1.0.0-beta is available as a published prerelease for Windows x64.**
 
-- [Download the Windows installer](https://github.com/AbdelGhafourRebbouh/biomes/releases/download/v1.0.0-beta/biomesSetup-v1.0.0-beta.exe)
+<p align="left">
+  <a href="https://github.com/AbdelGhafourRebbouh/biomes/releases/download/v1.0.0-beta/biomesSetup-v1.0.0-beta.exe">
+    <img src="https://img.shields.io/badge/Download-v1.0.0--beta%20Installer-0078D4?style=for-the-badge&amp;logo=windows&amp;logoColor=white" alt="Download Installer">
+  </a>
+  <a href="https://github.com/AbdelGhafourRebbouh/biomes/releases">
+    <img src="https://img.shields.io/badge/GitHub-View%20Releases-2ea44f?style=for-the-badge&amp;logo=github&amp;logoColor=white" alt="View Releases">
+  </a>
+</p>
+
 - [v1.0.0-beta release notes](https://github.com/AbdelGhafourRebbouh/biomes/releases/tag/v1.0.0-beta)
 - [All releases](https://github.com/AbdelGhafourRebbouh/biomes/releases) · [Project website](https://biomes-one.vercel.app/)
 
@@ -254,6 +262,11 @@ New Chrome windows use Chrome's last-used profile; per-zone browser account and 
 ## ☕ Community support & funding
 
 biomes is independently built by [Abdelghafour Rebbouh](https://github.com/AbdelGhafourRebbouh). If it saves you time or helps you start your work, you can [support development on Ko-fi](https://ko-fi.com/abdelghafourrebbouh).
+<p align="left">
+  <a href="https://ko-fi.com/abdelghafourrebbouh">
+    <img src="https://img.shields.io/badge/Support_on-Ko--fi-FF5E5B?style=for-the-badge&logo=kofi&logoColor=white" alt="Support on Ko-fi">
+  </a>
+</p>
 
 Funding priorities:
 
