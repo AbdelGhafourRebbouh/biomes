@@ -21,7 +21,7 @@
 
 <p align="center">
   <a href="https://biomes-one.vercel.app/">Website</a> ·
-  <a href="https://github.com/AbdelGhafourRebbouh/biomes/releases/tag/v1.0.0-beta">Download beta for Windows</a> ·
+  <a href="https://github.com/AbdelGhafourRebbouh/biomes/releases/download/beta/biomesSetup.exe">Download beta for Windows</a> ·
   <a href="https://biomes-one.vercel.app/assets/biomes-demo.mp4">Watch the demo (video)</a>
 </p>
 
@@ -167,7 +167,7 @@ The download button uses one permanent address:
 https://github.com/AbdelGhafourRebbouh/biomes/releases/download/beta/biomesSetup.exe
 ```
 
-This address becomes live after the first successful **Build and publish beta** Actions run. Until then, the [original beta installer](https://github.com/AbdelGhafourRebbouh/biomes/releases/download/v1.0.0-beta/biomesSetup-v1.0.0-beta.exe) remains available.
+Use this address wherever you share biomes: it serves the latest successfully published beta installer.
 
 Each successful push to `main` builds, tests, and publishes a versioned beta, then refreshes the permanent download and update feed. Failed builds do not replace the previous download. Older versioned releases remain available.
 
@@ -182,7 +182,7 @@ Updater-enabled versions notify you through the system tray. Click the notificat
 
 Run `biomesSetup.exe` and follow the installer. It installs per user under `%LOCALAPPDATA%\Programs\biomes`, creates a Start Menu shortcut, and offers an optional Desktop shortcut.
 
-The beta installer is currently **unsigned**, so Windows may show an unknown-publisher or SmartScreen warning. Code signing is a funding priority. Download from this repository's releases. When a release includes a SHA-256 checksum, use it to verify the downloaded file; the current beta release does not include a separate checksum asset.
+The beta installer is currently **unsigned**, so Windows may show an unknown-publisher or SmartScreen warning. Code signing is a funding priority. Download from this repository's releases and use the accompanying SHA-256 checksum to verify the downloaded file.
 
 Before upgrading, exit the running app through its tray menu. Your personal data under `%LOCALAPPDATA%\biomes\` is preserved during ordinary upgrades and uninstall. See [RELEASE.md](RELEASE.md) for ZIP deployment and bootstrapper details.
 
