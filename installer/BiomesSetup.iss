@@ -5,6 +5,7 @@
   #define OutputDir "..\dist"
 #endif
 #define AppVersion GetStringFileInfo(PackageDir + "\Biomes.exe", "ProductVersion")
+#define NumericVersion GetVersionNumbersString(PackageDir + "\Biomes.exe")
 
 [Setup]
 ; Stable across releases: upgrades retain the same per-user uninstall entry.
@@ -30,7 +31,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 CloseApplications=yes
 RestartApplications=no
-VersionInfoVersion=1.0.0.0
+VersionInfoVersion={#NumericVersion}
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &Desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
@@ -46,10 +47,23 @@ Name: "{userdesktop}\biomes"; Filename: "{app}\Biomes.exe"; WorkingDir: "{app}";
 
 [Run]
 Filename: "{app}\Biomes.exe"; Description: "Launch biomes"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\Biomes.exe"; Flags: nowait; Check: IsBiomesUpdate
 
 ; No wildcard uninstall deletion and no operations on {localappdata}\biomes.
 ; Inno removes only installed files, shortcuts, and its per-user uninstall entry.
 [Code]
+function OpenProcess(DesiredAccess: LongWord; InheritHandle: Boolean; ProcessId: LongWord): THandle;
+  external 'OpenProcess@kernel32.dll stdcall';
+function WaitForSingleObject(Handle: THandle; Milliseconds: LongWord): LongWord;
+  external 'WaitForSingleObject@kernel32.dll stdcall';
+function CloseHandle(Handle: THandle): Boolean;
+  external 'CloseHandle@kernel32.dll stdcall';
+
+function IsBiomesUpdate: Boolean;
+begin
+  Result := ExpandConstant('{param:BIOMESUPDATE|0}') = '1';
+end;
+
 function RuntimeInRegistry(RootKey: Integer): Boolean;
 var Version: String;
 begin
@@ -66,9 +80,19 @@ begin
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
-var ExitCode: Integer; AppDir, DataDir: String;
+var ExitCode, UpdatePid: Integer; AppDir, DataDir: String; UpdateProcess: THandle;
 begin
   Result := '';
+  UpdatePid := StrToIntDef(ExpandConstant('{param:BIOMESPID|0}'), 0);
+  if IsBiomesUpdate and (UpdatePid > 0) then begin
+    UpdateProcess := OpenProcess($00100000, False, UpdatePid);
+    if UpdateProcess <> 0 then begin
+      if WaitForSingleObject(UpdateProcess, 30000) <> 0 then
+        Result := 'biomes has not finished closing. Exit it from the tray and retry the update.';
+      CloseHandle(UpdateProcess);
+      if Result <> '' then Exit;
+    end;
+  end;
   AppDir := AddBackslash(Lowercase(ExpandConstant('{app}')));
   DataDir := AddBackslash(Lowercase(ExpandConstant('{localappdata}\biomes')));
   if Pos(DataDir, AppDir) = 1 then begin

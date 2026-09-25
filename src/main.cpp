@@ -22,6 +22,7 @@
 #include "../include/core/hotkey_manager.hpp"
 #include "../include/core/app_launcher.hpp"
 #include "../include/core/app_paths.hpp"
+#include "../include/core/app_updater.hpp"
 #include "../include/core/legacy_data_migration.hpp"
 #include "../include/core/background_host.hpp"
 #include "../include/core/native_settings.hpp"
@@ -1100,6 +1101,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         try { background.open(); }
         catch (...) { MessageBoxW(nullptr,L"Could not open dashboard. biomes remains available in the tray.",L"biomes",MB_OK | MB_ICONERROR); }
     }
+    biomes::AppUpdater updater([&] { background.NotifyUpdate(); }, [&] { background.RequestExit(); });
+    background.periodic = [&] { updater.Tick(); };
+    background.checkUpdates = [&] { updater.Check(); };
+    background.updateAvailable = [&] { return updater.Available(); };
     return background.Run();
 }
 

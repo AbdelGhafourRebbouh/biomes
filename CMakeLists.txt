@@ -1,6 +1,15 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(Biomes VERSION 1.0.0 LANGUAGES CXX RC)
+set(BIOMES_BUILD_NUMBER "0" CACHE STRING "Monotonic release build number")
+set(BIOMES_RELEASE_VERSION "1.0.0-beta" CACHE STRING "Published release version")
+if(NOT BIOMES_BUILD_NUMBER MATCHES "^[0-9]+$" OR BIOMES_BUILD_NUMBER GREATER 65535)
+    message(FATAL_ERROR "BIOMES_BUILD_NUMBER must be 0..65535")
+endif()
+if(NOT BIOMES_RELEASE_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+-beta(\\.[0-9]+)?$")
+    message(FATAL_ERROR "Invalid beta version")
+endif()
+configure_file(resources/release_version.h.in generated/release_version.h @ONLY)
 
 # Apply consistently to the application and regression executables.
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
@@ -33,18 +42,20 @@ add_executable(Biomes WIN32
     src/core/monitor_manager.cpp
     src/core/window_scaler.cpp
     src/core/app_launcher.cpp
+    src/core/app_updater.cpp
     src/ui/grid_overlay.cpp
     src/ui/webview_window.cpp
     src/ui/launch_panel.cpp
 )
 
 target_include_directories(Biomes PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}/generated
     resources
     include
     include/external/webview2
 )
 
-target_link_libraries(Biomes PRIVATE ole32 user32 shell32 advapi32 gdi32 dwmapi shcore dcomp)
+target_link_libraries(Biomes PRIVATE ole32 user32 shell32 advapi32 gdi32 dwmapi shcore dcomp winhttp bcrypt)
 
 # Keep symbols alongside Release builds for local crash-dump diagnosis.
 if(MSVC)
@@ -58,6 +69,10 @@ endif()
 option(BIOMES_BUILD_TESTS "Build isolated native stability regression tests" OFF)
 if(BIOMES_BUILD_TESTS)
     enable_testing()
+    add_executable(BiomesUpdaterTests tests/updater_tests.cpp src/core/app_updater.cpp src/core/app_paths.cpp)
+    target_include_directories(BiomesUpdaterTests PRIVATE include ${CMAKE_CURRENT_BINARY_DIR}/generated)
+    target_link_libraries(BiomesUpdaterTests PRIVATE ole32 shell32 user32 winhttp bcrypt)
+    add_test(NAME updater_regressions COMMAND BiomesUpdaterTests)
     add_executable(BiomesIpcTests src/core/ipc_bridge_tests.cpp src/core/ipc_bridge.cpp)
     target_include_directories(BiomesIpcTests PRIVATE include)
     add_test(NAME ipc_regressions COMMAND BiomesIpcTests)

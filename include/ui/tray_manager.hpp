@@ -5,10 +5,11 @@ namespace biomes {
 class TrayManager {
 public:
     static constexpr UINT CallbackMessage = WM_APP + 191;
-    enum Command : UINT { Open = 1, Startup = 2, Exit = 3 };
+    enum Command : UINT { Open = 1, Startup = 2, Exit = 3, Update = 4 };
     bool Add(HWND owner);
     void Remove();
-    UINT Menu(HWND owner, bool startup);
+    UINT Menu(HWND owner, bool startup, bool updateAvailable = false);
+    void NotifyUpdate();
     bool Available() const { return available_; }
     ~TrayManager() { Remove(); }
 private:

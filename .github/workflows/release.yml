@@ -1,0 +1,52 @@
+name: Build and publish beta
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+concurrency:
+  group: biomes-beta-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-2022
+    timeout-minutes: 40
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Configure versioned Release
+        run: |
+          $version = "1.0.0-beta.$env:GITHUB_RUN_NUMBER"
+          "BIOMES_VERSION=$version" >> $env:GITHUB_ENV
+          cmake -S . -B build-stability -A x64 -DBIOMES_BUILD_TESTS=ON "-DBIOMES_RELEASE_VERSION=$version" "-DBIOMES_BUILD_NUMBER=$env:GITHUB_RUN_NUMBER"
+          if ($LASTEXITCODE) { throw 'Configure failed' }
+      - name: Build and test
+        run: |
+          cmake --build build-stability --config Release --parallel 4
+          if ($LASTEXITCODE) { throw 'Build failed' }
+          ctest --test-dir build-stability -C Release --output-on-failure --no-tests=error
+          if ($LASTEXITCODE) { throw 'Regression tests failed' }
+          ./tests/release_pipeline_tests.ps1
+      - name: Install packaging compiler
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE) { throw 'Inno Setup installation failed' }
+          }
+      - name: Build verified installer
+        run: ./scripts/build_installer.ps1 -SkipBuild
+      - name: Publish version and update beta channel
+        run: ./scripts/publish_release.ps1 -Version $env:BIOMES_VERSION -BuildNumber $env:GITHUB_RUN_NUMBER -Commit $env:GITHUB_SHA

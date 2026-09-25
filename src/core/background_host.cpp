@@ -12,6 +12,7 @@ bool BackgroundHost::Initialize(HINSTANCE instance, const std::wstring& windowCl
     if (!hwnd_) return false;
     taskbarCreated_ = RegisterWindowMessageW(L"TaskbarCreated");
     if (withTray_) tray_.Add(hwnd_);
+    SetTimer(hwnd_, 1, 1000, nullptr);
     return true;
 }
 BackgroundHost::~BackgroundHost() { tray_.Remove(); if (hwnd_) DestroyWindow(hwnd_); }
@@ -38,6 +39,9 @@ LRESULT CALLBACK BackgroundHost::Proc(HWND hwnd, UINT message, WPARAM wp, LPARAM
     }
     if (message == WM_NCDESTROY) { self->hwnd_ = nullptr; return DefWindowProcW(hwnd,message,wp,lp); }
     if (self->stopping_) return DefWindowProcW(hwnd,message,wp,lp);
+    if (message == WM_TIMER && wp == 1) {
+        self->pending_.push_back([self] { if (self->periodic) self->periodic(); }); return 0;
+    }
     if (message == SingleInstance::ActivateMessage) {
         self->pending_.push_back([self] { if (self->open) self->open(); });
         PostMessageW(hwnd, WM_NULL, 0, 0); return 1;
@@ -54,13 +58,18 @@ LRESULT CALLBACK BackgroundHost::Proc(HWND hwnd, UINT message, WPARAM wp, LPARAM
     }
     if (message == TrayManager::CallbackMessage) {
         const UINT event = LOWORD(lp);
+        if (event == NIN_BALLOONUSERCLICK) {
+            self->pending_.push_back([self] { if (self->checkUpdates) self->checkUpdates(); }); return 0;
+        }
         if (event == NIN_SELECT || event == NIN_KEYSELECT)
             self->pending_.push_back([self] { if (self->open) self->open(); });
         else if (event == WM_CONTEXTMENU) self->pending_.push_back([self] {
-            const UINT command = self->tray_.Menu(self->hwnd_, self->startupEnabled && self->startupEnabled());
+            const UINT command = self->tray_.Menu(self->hwnd_, self->startupEnabled && self->startupEnabled(),
+                self->updateAvailable && self->updateAvailable());
             if (command == TrayManager::Open && self->open) self->open();
             if (command == TrayManager::Startup && self->toggleStartup) self->toggleStartup();
             if (command == TrayManager::Exit) self->RequestExit();
+            if (command == TrayManager::Update && self->checkUpdates) self->checkUpdates();
         });
         return 0;
     }

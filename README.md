@@ -81,7 +81,7 @@ biomes is free and open source. Your workspace layouts and settings stay on your
 - **WebView2 recovery:** attempt to recreate a failed UI controller while keeping the background engine alive and preserving its profile.
 - **Per-user installation:** install without administrator elevation. Ordinary uninstall removes app files and shortcuts while preserving your biomes data.
 
-**Privacy boundary:** workspace management is local. Optional community links and newsletter signup use external services; newsletter signup sends the submitted form data. Microsoft WebView2 installation and updates also use Microsoft's services.
+**Privacy boundary:** workspace management is local. Optional community links and newsletter signup use external services; newsletter signup sends the submitted form data. biomes checks GitHub for beta updates at startup and every six hours while running; installing an update requires confirmation. Microsoft WebView2 installation and updates also use Microsoft's services.
 
 ### Make your first biome
 
@@ -148,8 +148,8 @@ AI helps me explore those problems and iterate on possible fixes. The design dir
 **v1.0.0-beta is available as a published prerelease for Windows x64.**
 
 <p align="left">
-  <a href="https://github.com/AbdelGhafourRebbouh/biomes/releases/download/v1.0.0-beta/biomesSetup-v1.0.0-beta.exe">
-    <img src="https://img.shields.io/badge/Download-v1.0.0--beta%20Installer-0078D4?style=for-the-badge&amp;logo=windows&amp;logoColor=white" alt="Download Installer">
+  <a href="https://github.com/AbdelGhafourRebbouh/biomes/releases/download/beta/biomesSetup.exe">
+    <img src="https://img.shields.io/badge/Download-Latest%20Beta%20Installer-0078D4?style=for-the-badge&amp;logo=windows&amp;logoColor=white" alt="Download Installer">
   </a>
   <a href="https://github.com/AbdelGhafourRebbouh/biomes/releases">
     <img src="https://img.shields.io/badge/GitHub-View%20Releases-2ea44f?style=for-the-badge&amp;logo=github&amp;logoColor=white" alt="View Releases">
@@ -159,12 +159,28 @@ AI helps me explore those problems and iterate on possible fixes. The design dir
 - [v1.0.0-beta release notes](https://github.com/AbdelGhafourRebbouh/biomes/releases/tag/v1.0.0-beta)
 - [All releases](https://github.com/AbdelGhafourRebbouh/biomes/releases) · [Project website](https://biomes-one.vercel.app/)
 
+### Updates
+
+The download button uses one permanent address:
+
+```text
+https://github.com/AbdelGhafourRebbouh/biomes/releases/download/beta/biomesSetup.exe
+```
+
+This address becomes live after the first successful **Build and publish beta** Actions run. Until then, the [original beta installer](https://github.com/AbdelGhafourRebbouh/biomes/releases/download/v1.0.0-beta/biomesSetup-v1.0.0-beta.exe) remains available.
+
+Each successful push to `main` builds, tests, and publishes a versioned beta, then refreshes the permanent download and update feed. Failed builds do not replace the previous download. Older versioned releases remain available.
+
+Updater-enabled versions notify you through the system tray. Click the notification or right-click the tray icon and choose **Update and restart...**. You can also use **Check for updates...**. The installer downloads only after confirmation, is checked against the release SHA-256, and preserves your saved layouts and settings.
+
+**Existing v1.0.0-beta users need to install an updater-enabled release once manually.** The original beta cannot receive this capability remotely. This update channel distributes beta builds, and the installer remains unsigned until code signing is funded.
+
 ### Requirements
 
 - **Windows 10 or Windows 11, 64-bit (x64).**
 - **Microsoft WebView2 Evergreen Runtime.** Setup includes Microsoft's bootstrapper for machines where the runtime is missing; that installation requires internet access.
 
-Run `biomesSetup-v1.0.0-beta.exe` and follow the installer. It installs per user under `%LOCALAPPDATA%\Programs\biomes`, creates a Start Menu shortcut, and offers an optional Desktop shortcut.
+Run `biomesSetup.exe` and follow the installer. It installs per user under `%LOCALAPPDATA%\Programs\biomes`, creates a Start Menu shortcut, and offers an optional Desktop shortcut.
 
 The beta installer is currently **unsigned**, so Windows may show an unknown-publisher or SmartScreen warning. Code signing is a funding priority. Download from this repository's releases. When a release includes a SHA-256 checksum, use it to verify the downloaded file; the current beta release does not include a separate checksum asset.
 
@@ -205,7 +221,7 @@ This builds and tests Release, packages the allowlisted files, and writes `dist\
 
 ### Additional checks
 
-The 13 native regression suites cover IPC, WebView2 recovery and responsive onboarding, persistence, monitor resolution, placement, launch tracking, storage, and background lifetime.
+The 14 native regression suites cover IPC, WebView2 recovery and responsive onboarding, persistence, monitor resolution, placement, launch tracking, storage, and background lifetime.
 
 ```powershell
 # Optional: Node.js with built-in WebSocket support, plus Microsoft Edge.

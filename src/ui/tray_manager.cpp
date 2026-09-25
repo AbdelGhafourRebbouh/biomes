@@ -12,12 +12,21 @@ bool TrayManager::Add(HWND owner) {
     return available_;
 }
 void TrayManager::Remove() { if (available_) Shell_NotifyIconW(NIM_DELETE, &icon_); available_ = false; }
-UINT TrayManager::Menu(HWND owner, bool startup) {
+void TrayManager::NotifyUpdate() {
+    if (!available_) return;
+    icon_.uFlags = NIF_INFO;
+    icon_.dwInfoFlags = NIIF_INFO;
+    wcscpy_s(icon_.szInfoTitle, L"A biomes update is available");
+    wcscpy_s(icon_.szInfo, L"Click to update and restart, or use the biomes tray menu when you are ready.");
+    Shell_NotifyIconW(NIM_MODIFY, &icon_);
+}
+UINT TrayManager::Menu(HWND owner, bool startup, bool updateAvailable) {
     HMENU menu = CreatePopupMenu();
     if (!menu) return 0;
     AppendMenuW(menu, MF_STRING, Open, L"Open biomes");
     AppendMenuW(menu, MF_STRING | (startup ? MF_CHECKED : 0), Startup, L"Launch at Windows Startup");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, Update, updateAvailable ? L"Update and restart..." : L"Check for updates...");
     AppendMenuW(menu, MF_STRING, Exit, L"Exit biomes");
     POINT point{}; GetCursorPos(&point); SetForegroundWindow(owner);
     const UINT command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON, point.x, point.y, 0, owner, nullptr);

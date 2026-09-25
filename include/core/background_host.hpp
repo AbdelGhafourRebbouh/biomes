@@ -9,6 +9,9 @@ class BackgroundHost {
 public:
     std::function<void()> open, shutdown, displayChanged, toggleStartup;
     std::function<bool()> startupEnabled;
+    std::function<void()> checkUpdates, periodic;
+    std::function<bool()> updateAvailable;
+    void NotifyUpdate() { tray_.NotifyUpdate(); }
     std::function<void(int)> hotkey;
     bool Initialize(HINSTANCE instance, const std::wstring& windowClass, bool withTray = true);
     HWND Hwnd() const { return hwnd_; }
