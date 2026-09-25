@@ -54,7 +54,6 @@ try {
     [IO.File]::AppendAllText("$fixture/dist/biomesSetup-v1.0.0-beta.5.exe",'tampered')
     $failed=$false; try { & "$fixture/scripts/publish_release.ps1" @parameters } catch { $failed=$true }
     Require ($failed -and $global:releaseCalls.Count -eq 0) 'Checksum failure must prevent publication'
-    Write-Output 'PASS: release ordering, fixed channel URL, version rollback rejection and failed upload/checksum protection (mocked; no publication).'
 } finally {
     $env:GH_REPO=$previousRepo
     Remove-Item Function:\gh,Function:\Invoke-RestMethod
@@ -64,3 +63,8 @@ try {
         [IO.Path]::GetFileName($resolved) -notmatch '^biomes-release-test-[0-9a-f]{32}$') { throw 'Unsafe fixture cleanup path.' }
     Remove-Item -LiteralPath $resolved -Recurse -Force
 }
+# The failed-upload mock deliberately sets the native exit code to 1. GitHub
+# Actions propagates LASTEXITCODE after this script returns. Clear it only once
+# every assertion and cleanup has succeeded; exceptions must still fail the job.
+$global:LASTEXITCODE = 0
+Write-Output 'PASS: release ordering, fixed channel URL, version rollback rejection and failed upload/checksum protection (mocked; no publication).'
