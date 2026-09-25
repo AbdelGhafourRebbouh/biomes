@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-<h1 align="center">biomes: Windows workspace manager and window grid layout tool</h1>
+<h1 align="center">biomes: Windows workspace manager and window grid layout app</h1>
 
 <h3 align="center">Launch your biome. Trigger your routine.</h3>
 
