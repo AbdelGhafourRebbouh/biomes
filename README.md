@@ -156,8 +156,8 @@ AI helps me explore those problems and iterate on possible fixes. The design dir
   </a>
 </p>
 
-- [v1.0.0-beta release notes](https://github.com/AbdelGhafourRebbouh/biomes/releases/tag/v1.0.0-beta)
-- [All releases](https://github.com/AbdelGhafourRebbouh/biomes/releases) · [Project website](https://biomes-one.vercel.app/)
+- [v1.0.0-beta release notes]([https://github.com/AbdelGhafourRebbouh/biomes/releases/tag/v1.0.0-beta](https://github.com/AbdelGhafourRebbouh/biomes/releases/download/beta/biomesSetup.exe))
+- [Current beta release](https://github.com/AbdelGhafourRebbouh/biomes/releases/tag/beta) · [Project website](https://biomes-one.vercel.app/)
 
 ### Updates
 
@@ -259,7 +259,7 @@ Generated builds, temporary browser profiles, and distribution binaries are excl
 
 - [x] Windows workspace layouts, multi-monitor grids, tray lifetime, and global hotkeys.
 - [x] Local persistence, launch progress, UI recovery, and per-user beta installer.
-- [x] Publish [v1.0.0-beta](https://github.com/AbdelGhafourRebbouh/biomes/releases/tag/v1.0.0-beta) for Windows x64.
+- [x] Publish [v1.0.0-beta release notes]([https://github.com/AbdelGhafourRebbouh/biomes/releases/tag/v1.0.0-beta](https://github.com/AbdelGhafourRebbouh/biomes/releases/download/beta/biomesSetup.exe))for Windows x64.
 - [ ] Improve beta compatibility from real-world feedback.
 - [ ] Publish and validate WinGet and/or Scoop manifests, then document installation commands.
 - [ ] Fund Windows code signing.
