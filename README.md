@@ -33,11 +33,10 @@ Save and restore window layouts, snap windows to a grid, and keep separate multi
 
 [![Your workspace. One hotkey. — biomes dashboard and saved workspaces](docs/screenshots/ChatGPT%20Image%20Sep%2022%2C%202026%2C%2011_19_00%20PM.png)](https://biomes-one.vercel.app/assets/biomes-demo.mp4)
 
-**[Watch the demo video](https://biomes-one.vercel.app/assets/biomes-demo.mp4)** · [Visit the biomes website](https://biomes-one.vercel.app/)
-
 ![Draw your layout — create zones, assign apps, and save your biome](docs/screenshots/ChatGPT%20Image%20Sep%2022%2C%202026%2C%2011_19_08%20PM.png)
 
 ![Less arranging. More creating. — a coding workspace with editor, browser, notes, and music](docs/screenshots/ChatGPT%20Image%20Sep%2022%2C%202026%2C%2011_21_05%20PM.png)
+**[Watch the demo video](https://biomes-one.vercel.app/assets/biomes-demo.mp4)** · [Visit the biomes website](https://biomes-one.vercel.app/)
 
 ## 💡 Why biomes? The story
 
