@@ -26,24 +26,21 @@ foreach ($file in @($installer,$zip)) {
     if ($hash -ne $expected) { throw "Checksum mismatch: $file" }
 }
 $tag = "v$Version"
-# Versioned releases are never overwritten. A retry can finish an existing draft.
+# Existing releases/assets are never replaced, including incomplete drafts.
 $existing = & gh release view $tag --json isDraft 2>$null
 if ($LASTEXITCODE -ne 0) {
     & gh release create $tag --target $Commit --title "biomes $Version" --draft --prerelease --generate-notes
     if ($LASTEXITCODE) { throw 'Could not create release draft.' }
-} elseif (-not ($existing | ConvertFrom-Json).isDraft) {
-    throw 'This version is already published. Start a new workflow run for a new version.'
+} else {
+    throw 'This version already exists. Inspect any incomplete draft and publish a new version tag.'
 }
-& gh release upload $tag $installer "$installer.sha256" $zip "$zip.sha256" --clobber
+& gh release upload $tag $installer "$installer.sha256" $zip "$zip.sha256"
 if ($LASTEXITCODE) { throw 'Versioned upload failed.' }
 & gh release edit $tag --draft=false
 if ($LASTEXITCODE) { throw 'Could not publish verified version.' }
 
-# Permanent website URL; the feed points to the immutable versioned installer.
-$alias = Join-Path $dist 'biomesSetup.exe'
-Copy-Item -LiteralPath $installer -Destination $alias -Force
+# Only discovery metadata is mutable. Never replace an installer or its counter.
 $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
-"$hash  biomesSetup.exe" | Set-Content -LiteralPath "$alias.sha256" -Encoding ascii
 $feed = Join-Path $dist 'update.json'
 @{ schemaVersion=1; channel='beta'; build=$BuildNumber; version=$Version;
    url="https://github.com/AbdelGhafourRebbouh/biomes/releases/download/$tag/biomesSetup-v$Version.exe";
@@ -51,12 +48,10 @@ $feed = Join-Path $dist 'update.json'
     ConvertTo-Json | Set-Content -LiteralPath $feed -Encoding utf8
 & gh release view beta *> $null
 if ($LASTEXITCODE -ne 0) {
-    & gh release create beta --target $Commit --title 'biomes — current beta' --prerelease --notes 'Latest tested beta. Download biomesSetup.exe. Older versioned releases remain available.'
+    & gh release create beta --target $Commit --title 'biomes update feed' --prerelease --notes 'Update discovery metadata. Download installers from the versioned releases.'
     if ($LASTEXITCODE) { throw 'Could not create beta channel.' }
 }
-& gh release upload beta $alias "$alias.sha256" --clobber
-if ($LASTEXITCODE) { throw 'Could not refresh permanent installer URL.' }
 # Publish the feed last: users never see a version whose installer is absent.
 & gh release upload beta $feed --clobber
 if ($LASTEXITCODE) { throw 'Could not refresh update feed.' }
-Write-Output 'Published: https://github.com/AbdelGhafourRebbouh/biomes/releases/download/beta/biomesSetup.exe'
+Write-Output "Published: https://github.com/AbdelGhafourRebbouh/biomes/releases/tag/$tag"

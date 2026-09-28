@@ -5,6 +5,7 @@ $previousRepo = $env:GH_REPO
 $global:releaseCalls = [Collections.Generic.List[string]]::new()
 $global:feedBuild = 4
 $global:failUpload = $false
+$global:existingRelease = $false
 # These mocks prohibit external publication/network calls during this test.
 function global:Invoke-RestMethod {
     param($Uri,$Headers,$TimeoutSec)
@@ -19,7 +20,10 @@ function global:gh {
     $command = $args -join ' '
     $global:releaseCalls.Add($command)
     $global:LASTEXITCODE = 0
-    if ($command -eq 'release view v1.0.0-beta.5 --json isDraft') { $global:LASTEXITCODE=1 }
+    if ($command -eq 'release view v1.0.0-beta.5 --json isDraft') {
+        if ($global:existingRelease) { return '{"isDraft":false}' }
+        $global:LASTEXITCODE=1
+    }
     if ($global:feedBuild -eq -1 -and $command -eq 'release view beta') { $global:LASTEXITCODE=1 }
     if ($global:failUpload -and $command.StartsWith('release upload v')) { $global:LASTEXITCODE=1 }
 }
@@ -41,6 +45,9 @@ try {
     Require ($feed.url -like '*/v1.0.0-beta.5/biomesSetup-v1.0.0-beta.5.exe') 'Feed must reference a versioned installer'
     Require ($global:releaseCalls[$global:releaseCalls.Count-1] -like 'release upload beta *update.json*') 'Feed must be published last'
     Require ($global:releaseCalls.IndexOf('release edit v1.0.0-beta.5 --draft=false') -gt 0) 'Version must publish before channel'
+    Require (-not ($global:releaseCalls | Where-Object { $_ -like 'release upload v*--clobber*' })) 'Versioned assets must never be overwritten'
+    Require (-not ($global:releaseCalls | Where-Object { $_ -like 'release upload beta *biomesSetup*' })) 'Rolling installer must remain untouched'
+    Require (@($global:releaseCalls | Where-Object { $_ -like '*--clobber*' }).Count -eq 1) 'Only update metadata may be replaced'
     $global:releaseCalls.Clear(); $global:feedBuild=-1
     & "$fixture/scripts/publish_release.ps1" @parameters
     Require ([bool]($global:releaseCalls | Where-Object { $_ -like 'release create beta *' })) 'First publication must create missing channel'
@@ -51,6 +58,10 @@ try {
     $failed=$false; try { & "$fixture/scripts/publish_release.ps1" @parameters } catch { $failed=$true }
     Require ($failed -and -not ($global:releaseCalls | Where-Object { $_ -like 'release upload beta*' })) 'Failed version upload must preserve channel'
     $global:failUpload=$false; $global:releaseCalls.Clear()
+    $global:existingRelease=$true
+    $failed=$false; try { & "$fixture/scripts/publish_release.ps1" @parameters } catch { $failed=$true }
+    Require ($failed -and -not ($global:releaseCalls | Where-Object { $_ -like 'release upload *' -or $_ -like 'release edit *' })) 'Existing releases must remain untouched'
+    $global:existingRelease=$false; $global:releaseCalls.Clear()
     [IO.File]::AppendAllText("$fixture/dist/biomesSetup-v1.0.0-beta.5.exe",'tampered')
     $failed=$false; try { & "$fixture/scripts/publish_release.ps1" @parameters } catch { $failed=$true }
     Require ($failed -and $global:releaseCalls.Count -eq 0) 'Checksum failure must prevent publication'
@@ -67,4 +78,4 @@ try {
 # Actions propagates LASTEXITCODE after this script returns. Clear it only once
 # every assertion and cleanup has succeeded; exceptions must still fail the job.
 $global:LASTEXITCODE = 0
-Write-Output 'PASS: release ordering, fixed channel URL, version rollback rejection and failed upload/checksum protection (mocked; no publication).'
+Write-Output 'PASS: versioned asset preservation, metadata-only channel updates, rollback rejection and failed upload/checksum protection (mocked; no publication).'

@@ -55,31 +55,35 @@ preserving `%LOCALAPPDATA%\biomes`. The installer is currently unsigned.
 
 ## Automated beta releases and in-app updates
 
-`.github/workflows/release.yml` runs on pushes to `main`, or manually through Actions. It builds on Windows, runs all native regressions, packages the installer, and publishes only after those steps pass. `GITHUB_TOKEN` uses repository contents-write permission; no personal access token belongs in the app or repository.
+Releases run only on pushed tags matching `v1.0.0-beta.N`. Pushing to `main`, including README changes, does not publish anything. The workflow builds and tests on Windows before packaging and publication, using repository contents-write permission.
 
-Versions are `1.0.0-beta.<workflow run number>`. The run number is embedded in the executable and installer resources, and the updater refuses same-version or older builds. Keep the workflow identity/run counter continuous. Before changing the base version or reaching build 65535, update the version policy and feed parser together.
+Choose an unused N larger than every previously published build and the current `beta/update.json` build (1..65535). N comes from the tag, not the Actions run number. Existing updaters validate `1.0.0-beta.N` exactly; moving to `1.0.1-beta` or another base requires an updater migration first.
 
-Each build has a separate versioned prerelease. A mutable `beta` prerelease holds `biomesSetup.exe`, its checksum, and `update.json`. Do not enable immutable assets for this rolling channel. The feed is uploaded last and points to the versioned installer, not the replaceable alias. A rerun cannot overwrite an already published version; start a new workflow-dispatch run if a published run needs to be superseded.
+After committing and pushing the desired changes, publish deliberately (replace N with your chosen number):
 
-Permanent website/README URL (live after the first successful workflow):
+```powershell
+git tag v1.0.0-beta.N
+git push origin v1.0.0-beta.N
+```
 
-https://github.com/AbdelGhafourRebbouh/biomes/releases/download/beta/biomesSetup.exe
+Never move or reuse a release tag. Versioned assets are uploaded without `--clobber`; an existing release, including a draft, is rejected. If a run fails after creating a draft, inspect it and use a new higher tag rather than replacing assets. If publication succeeds but feed upload fails, repair the metadata separately or publish a higher version; rerunning will not overwrite the release.
 
-The website download button needs this URL once; subsequent successful releases refresh its target automatically. The website source is managed separately from this repository. GitHub's `/releases/latest/download` shortcut does not select beta prereleases.
+Only `beta/update.json` remains mutable for compatibility with installed updaters. It is published last and points to a versioned installer. Historical rolling installers and their checksums are left untouched, preserving their remaining counters. The former `beta/biomesSetup.exe` link no longer delivers new builds. Do not delete old assets or releases if you want to retain their counts. Counts already lost through replacement cannot be recovered by this change. A badge summing all asset types includes mutable metadata downloads too; use installer-only statistics for durable installer totals.
 
-biomes checks the feed 20 seconds after startup and every six hours while running. A tray notification and menu offer Update and restart. Downloads use HTTPS, bounded sizes/timeouts, a pinned repository/versioned URL, and SHA-256 verification before execution. These checks protect transfer integrity; they are not a substitute for publisher code signing. The GitHub repository and Actions publishing permissions remain part of the update trust boundary.
+Share this download page on the website, README, and social media:
 
-Installers are staged under `%LOCALAPPDATA%\biomes\backups\updates\`. After the user confirms, the installer waits for the initiating process to finish normal session shutdown, installs into the current executable directory, and restarts biomes. A download/checksum/installer-launch failure leaves biomes open. If installation itself fails after shutdown, reopen biomes or run the downloaded installer manually. No forced termination of workspace apps is used.
+https://github.com/AbdelGhafourRebbouh/biomes/releases
 
-Users of the original beta must download and install the first updater-enabled version manually. Running copies without an updater cannot discover the new feed. Upgrades preserve the existing installer AppId and isolated user data.
+Users select the installer from the newest versioned beta. The private website is managed separately and needs its link changed once. GitHub's latest-release shortcut does not select prereleases.
 
-### First publication checklist
+biomes checks the feed 20 seconds after startup and every six hours while running. Users choose Update and restart. Downloads use HTTPS and SHA-256 verification and are staged under `%LOCALAPPDATA%\biomes\backups\updates\`. Normal shutdown, installer AppId, and isolated user data are unchanged. Original beta users without an updater still need one manual upgrade. The installer remains unsigned.
 
-1. Commit and push the updater/workflow changes to `main`.
-2. Check the Actions run, including native regressions and installer compilation. Local tests do not verify the hosted runner environment.
-3. Confirm both the versioned release and `beta` assets exist; download the permanent URL and verify its checksum.
-4. Install the updater-enabled build on a separate test account/PC with a saved biome.
-5. Publish a second build, confirm the tray notification, choose Update and restart, and verify version progression and retained data.
-6. Point the website button at the permanent URL and announce the one-time manual upgrade to existing beta users.
+### Verification before announcing an update
 
-Do not announce unattended update delivery before this end-to-end hosted-release/upgrade check succeeds. No workflow run, commit, push, or public release is performed by local packaging scripts alone.
+1. Push the new tag and check every Actions step succeeds.
+2. Confirm the versioned installer and checksum exist and the feed points to them.
+3. Verify previous installers retain their asset IDs and download counts.
+4. On a test account/PC, upgrade from an earlier updater-enabled release and confirm restart and saved layouts/settings.
+5. Update old website/social download links to the releases page.
+
+Local regression tests mock publication. They do not publish or verify a real hosted upgrade. No commit, tag, push, or release is created by editing these files.
