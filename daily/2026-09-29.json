@@ -1,0 +1,167 @@
+{
+  "date": "2026-09-29",
+  "total": 96,
+  "assets": {
+    "598052424": {
+      "id": "598052424",
+      "name": "Biomes-1.0.0-beta.8-windows-x64.zip",
+      "tag": "v1.0.0-beta.8",
+      "count": 0,
+      "observedCount": 0,
+      "present": true,
+      "firstSeen": "2026-09-29T11:30:17.977578+00:00",
+      "lastSeen": "2026-09-29T11:30:17.977578+00:00"
+    },
+    "598052418": {
+      "id": "598052418",
+      "name": "biomesSetup-v1.0.0-beta.8.exe",
+      "tag": "v1.0.0-beta.8",
+      "count": 0,
+      "observedCount": 0,
+      "present": true,
+      "firstSeen": "2026-09-29T11:30:17.977578+00:00",
+      "lastSeen": "2026-09-29T11:30:17.977578+00:00"
+    },
+    "595288005": {
+      "id": "595288005",
+      "name": "Biomes-1.0.0-beta.7-windows-x64.zip",
+      "tag": "v1.0.0-beta.7",
+      "count": 0,
+      "observedCount": 0,
+      "present": true,
+      "firstSeen": "2026-09-29T11:30:17.977578+00:00",
+      "lastSeen": "2026-09-29T11:30:17.977578+00:00"
+    },
+    "595288010": {
+      "id": "595288010",
+      "name": "biomesSetup-v1.0.0-beta.7.exe",
+      "tag": "v1.0.0-beta.7",
+      "count": 14,
+      "observedCount": 14,
+      "present": true,
+      "firstSeen": "2026-09-29T11:30:17.977578+00:00",
+      "lastSeen": "2026-09-29T11:30:17.977578+00:00"
+    },
+    "595282902": {
+      "id": "595282902",
+      "name": "Biomes-1.0.0-beta.6-windows-x64.zip",
+      "tag": "v1.0.0-beta.6",
+      "count": 0,
+      "observedCount": 0,
+      "present": true,
+      "firstSeen": "2026-09-29T11:30:17.977578+00:00",
+      "lastSeen": "2026-09-29T11:30:17.977578+00:00"
+    },
+    "595282904": {
+      "id": "595282904",
+      "name": "biomesSetup-v1.0.0-beta.6.exe",
+      "tag": "v1.0.0-beta.6",
+      "count": 0,
+      "observedCount": 0,
+      "present": true,
+      "firstSeen": "2026-09-29T11:30:17.977578+00:00",
+      "lastSeen": "2026-09-29T11:30:17.977578+00:00"
+    },
+    "595258517": {
+      "id": "595258517",
+      "name": "Biomes-1.0.0-beta.5-windows-x64.zip",
+      "tag": "v1.0.0-beta.5",
+      "count": 0,
+      "observedCount": 0,
+      "present": true,
+      "firstSeen": "2026-09-29T11:30:17.977578+00:00",
+      "lastSeen": "2026-09-29T11:30:17.977578+00:00"
+    },
+    "595258523": {
+      "id": "595258523",
+      "name": "biomesSetup-v1.0.0-beta.5.exe",
+      "tag": "v1.0.0-beta.5",
+      "count": 0,
+      "observedCount": 0,
+      "present": true,
+      "firstSeen": "2026-09-29T11:30:17.977578+00:00",
+      "lastSeen": "2026-09-29T11:30:17.977578+00:00"
+    },
+    "588982547": {
+      "id": "588982547",
+      "name": "Biomes-1.0.0-beta.4-windows-x64.zip",
+      "tag": "v1.0.0-beta.4",
+      "count": 6,
+      "observedCount": 6,
+      "present": true,
+      "firstSeen": "2026-09-29T11:30:17.977578+00:00",
+      "lastSeen": "2026-09-29T11:30:17.977578+00:00"
+    },
+    "588982548": {
+      "id": "588982548",
+      "name": "biomesSetup-v1.0.0-beta.4.exe",
+      "tag": "v1.0.0-beta.4",
+      "count": 0,
+      "observedCount": 0,
+      "present": true,
+      "firstSeen": "2026-09-29T11:30:17.977578+00:00",
+      "lastSeen": "2026-09-29T11:30:17.977578+00:00"
+    },
+    "588964962": {
+      "id": "588964962",
+      "name": "Biomes-1.0.0-beta.3-windows-x64.zip",
+      "tag": "v1.0.0-beta.3",
+      "count": 0,
+      "observedCount": 0,
+      "present": true,
+      "firstSeen": "2026-09-29T11:30:17.977578+00:00",
+      "lastSeen": "2026-09-29T11:30:17.977578+00:00"
+    },
+    "588964968": {
+      "id": "588964968",
+      "name": "biomesSetup-v1.0.0-beta.3.exe",
+      "tag": "v1.0.0-beta.3",
+      "count": 0,
+      "observedCount": 0,
+      "present": true,
+      "firstSeen": "2026-09-29T11:30:17.977578+00:00",
+      "lastSeen": "2026-09-29T11:30:17.977578+00:00"
+    },
+    "588942264": {
+      "id": "588942264",
+      "name": "Biomes-1.0.0-beta.2-windows-x64.zip",
+      "tag": "v1.0.0-beta.2",
+      "count": 0,
+      "observedCount": 0,
+      "present": true,
+      "firstSeen": "2026-09-29T11:30:17.977578+00:00",
+      "lastSeen": "2026-09-29T11:30:17.977578+00:00"
+    },
+    "588942265": {
+      "id": "588942265",
+      "name": "biomesSetup-v1.0.0-beta.2.exe",
+      "tag": "v1.0.0-beta.2",
+      "count": 0,
+      "observedCount": 0,
+      "present": true,
+      "firstSeen": "2026-09-29T11:30:17.977578+00:00",
+      "lastSeen": "2026-09-29T11:30:17.977578+00:00"
+    },
+    "595288134": {
+      "id": "595288134",
+      "name": "biomesSetup.exe",
+      "tag": "beta",
+      "count": 21,
+      "observedCount": 21,
+      "present": true,
+      "firstSeen": "2026-09-29T11:30:17.977578+00:00",
+      "lastSeen": "2026-09-29T11:30:17.977578+00:00"
+    },
+    "564187060": {
+      "id": "564187060",
+      "name": "biomesSetup-v1.0.0-beta.exe",
+      "tag": "v1.0.0-beta",
+      "count": 55,
+      "observedCount": 55,
+      "present": true,
+      "firstSeen": "2026-09-29T11:30:17.977578+00:00",
+      "lastSeen": "2026-09-29T11:30:17.977578+00:00"
+    }
+  },
+  "increase": null
+}
