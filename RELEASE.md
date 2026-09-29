@@ -87,3 +87,11 @@ biomes checks the feed 20 seconds after startup and every six hours while runnin
 5. Update old website/social download links to the releases page.
 
 Local regression tests mock publication. They do not publish or verify a real hosted upgrade. No commit, tag, push, or release is created by editing these files.
+
+## Download history
+
+`download-stats.yml` runs daily at 03:23 UTC, after successful release workflows, or manually through Actions. It reads all published releases and counts only biomes installers and distribution ZIPs. It writes `downloads.json`, daily total/difference snapshots, `badge.json`, and a readable report to the separate `download-stats` branch. These commits cannot trigger the tag-only release workflow.
+
+Each asset ID retains its highest observed count even after replacement/deletion; a new ID contributes independently. Initial counts establish a baseline, not downloads occurring that day. Same-day runs update that day's snapshot. Failed API reads or corrupt saved state fail the run without publishing partial totals. Git pushes are not forced. The figures include repeat downloads and in-app upgrades, and cannot recover counts lost before tracking or between a snapshot and deletion.
+
+After pushing this workflow to main, run **Track app downloads** once in Actions to initialize the branch and README badge. Future runs are automatic (scheduled runs may be delayed by GitHub). Keep the stats branch; deleting it loses the recorded history. No external analytics or app telemetry is required.

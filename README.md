@@ -13,7 +13,7 @@
 
 <p align="center">
   <a href="https://github.com/AbdelGhafourRebbouh/biomes/releases/tag/v1.0.0-beta"><img src="https://img.shields.io/badge/release-v1.0.0--beta-b8a9e6" alt="v1.0.0-beta — published prerelease"></a>
-  <a href="https://github.com/AbdelGhafourRebbouh/biomes/releases"><img src="https://img.shields.io/github/downloads/AbdelGhafourRebbouh/biomes/total?label=Downloads&amp;color=6f8e73" alt="GitHub release downloads"></a>
+  <a href="https://github.com/AbdelGhafourRebbouh/biomes/releases"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FAbdelGhafourRebbouh%2Fbiomes%2Fdownload-stats%2Fbadge.json" alt="Recorded app downloads"></a>
   <img src="https://img.shields.io/badge/Windows-10%20%2F%2011-0078D4" alt="Windows 10 and 11">
   <img src="https://img.shields.io/badge/C%2B%2B-17-00599C" alt="C++17">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPLv3-blue" alt="GNU GPLv3"></a>
@@ -68,7 +68,7 @@ biomes is free and open source. Your workspace layouts and settings stay on your
 
 ### Engine resilience
 
-- **15-second launch watchdog:** report an app that fails to expose a usable window instead of leaving a spinner running indefinitely.
+- **Patient app startup:** allow up to two minutes for large apps to open, with a reassuring status after 15 seconds and a bounded timeout for stalled launches.
 - **Asynchronous window tracking:** watch for new and replacement windows without blocking the dashboard.
 - **WebView2 recovery:** attempt to recreate a failed UI controller while keeping the background engine alive and preserving its profile.
 - **Per-user installation:** install without administrator elevation. Ordinary uninstall removes app files and shortcuts while preserving your biomes data.
@@ -150,6 +150,8 @@ AI helps me explore those problems and iterate on possible fixes. The design dir
 
 - [v1.0.0-beta release notes](https://github.com/AbdelGhafourRebbouh/biomes/releases/tag/v1.0.0-beta)
 - [All releases](https://github.com/AbdelGhafourRebbouh/biomes/releases) · [Project website](https://biomes-one.vercel.app/)
+
+Download history: [app download report](https://github.com/AbdelGhafourRebbouh/biomes/tree/download-stats). Counts include installers and distribution ZIPs, retain previously observed retired assets, and exclude update-feed/checksum requests. Tracking starts with the first successful tracker run; earlier lost counts cannot be reconstructed.
 
 ### Updates
 

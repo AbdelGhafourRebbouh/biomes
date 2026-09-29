@@ -50,6 +50,10 @@
             : data.failed ? 'Some apps need attention. The others are still opening.'
             : data.waiting ? 'Choose a project in your app. We’ll take it from there.' : 'A little moment. Your workspace is coming together.';
         $('.count').textContent = `${data.ready}/${data.total} apps ready`;
+        if (state === 'opening' && !data.failed && !data.waiting &&
+            (data.items || []).some(item => item.state === 'opening' && item.detail?.startsWith('Still opening.'))) {
+            $('.subtitle').textContent = 'Still opening. Larger apps can take a little longer.';
+        }
         $('.name').textContent = data.name || '';
         $('.name').title = data.name || '';
         $('.meter span').style.width = `${data.total ? Math.min(100, 100 * data.ready / data.total) : 0}%`;

@@ -1,0 +1,47 @@
+name: Track app downloads
+on:
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+  workflow_run:
+    workflows: ['Build and publish beta']
+    types: [completed]
+permissions:
+  contents: write
+concurrency:
+  group: biomes-download-stats
+  cancel-in-progress: false
+jobs:
+  track:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: main
+      - name: Test tracker
+        run: python3 -m unittest discover -s tests -p test_download_tracker.py
+      - name: Record statistics on separate branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          stats="$RUNNER_TEMP/biomes-download-stats"
+          remote=$(git ls-remote --heads origin refs/heads/download-stats)
+          if [ -n "$remote" ]; then
+            git fetch origin download-stats
+            git worktree add -b download-stats "$stats" FETCH_HEAD
+          else
+            git worktree add --detach "$stats" HEAD
+            git -C "$stats" switch --orphan download-stats
+          fi
+          python3 scripts/track_downloads.py --output "$stats"
+          git -C "$stats" config user.name 'github-actions[bot]'
+          git -C "$stats" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C "$stats" add downloads.json badge.json README.md daily
+          if ! git -C "$stats" diff --cached --quiet; then
+            git -C "$stats" commit -m 'Record app download statistics'
+            git -C "$stats" push origin HEAD:download-stats
+          fi

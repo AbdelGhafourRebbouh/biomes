@@ -18,6 +18,7 @@
 #include <atomic>
 #include <memory>
 #include <cmath>
+#include <cctype>
 
 #include <windows.h>
 #include <appmodel.h>
@@ -140,6 +141,7 @@ struct PendingSnap {
     vector<string> expectedAumids;
     unordered_set<HWND> knownWindows;
     ULONGLONG deadline = 0;
+    ULONGLONG slowNoticeAt = 0;
     HWND snappedHwnd = nullptr;
     string fullPath;
     bool dispatched = false;
@@ -176,6 +178,7 @@ struct PlacementCheck {
     SelectedBox zone;
     unsigned restoreAttempts = 0;
     unsigned retargets = 0;
+    bool dpiSecondPass = false;
 };
 vector<PlacementCheck> g_placementChecks;
 struct LaunchContext {
@@ -229,9 +232,32 @@ string DescribeWindowState(HWND hwnd, const RECT& actual) {
     return "normal";
 }
 
+RECT OuterRectForFrame(const RECT& target, const RECT& outer, const RECT& frame) {
+    // Reject stale DWM bounds (e.g. during restore) instead of applying huge offsets.
+    const LONG left = frame.left - outer.left, top = frame.top - outer.top;
+    const LONG right = outer.right - frame.right, bottom = outer.bottom - frame.bottom;
+    if (frame.right <= frame.left || frame.bottom <= frame.top ||
+        left < 0 || top < 0 || right < 0 || bottom < 0 ||
+        left > 64 || top > 64 || right > 64 || bottom > 64) return target;
+    return {target.left-left, target.top-top, target.right+right, target.bottom+bottom};
+}
+
+bool VisibleWindowRect(HWND hwnd, RECT& rect) {
+    if (!GetWindowRect(hwnd, &rect)) return false;
+    RECT frame{};
+    if (!IsIconic(hwnd) && SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS,
+            &frame, sizeof(frame))) && frame.right > frame.left && frame.bottom > frame.top) rect = frame;
+    return true;
+}
+
 bool RequestTargetPlacement(HWND hwnd, const RECT& target, const char* stage, bool show = false) {
-    const BOOL accepted = SetWindowPos(hwnd, nullptr, target.left, target.top,
-        target.right-target.left, target.bottom-target.top,
+    RECT requested = target, outer{}, frame{};
+    // Both APIs are physical pixels in the engine's per-monitor-aware context.
+    if (!IsIconic(hwnd) && !IsZoomed(hwnd) && GetWindowRect(hwnd, &outer) &&
+        SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &frame, sizeof(frame))))
+        requested = OuterRectForFrame(target, outer, frame);
+    const BOOL accepted = SetWindowPos(hwnd, nullptr, requested.left, requested.top,
+        requested.right-requested.left, requested.bottom-requested.top,
         SWP_ASYNCWINDOWPOS | SWP_NOACTIVATE | SWP_NOZORDER | (show ? SWP_SHOWWINDOW : 0));
     if (!accepted) {
         const DWORD error = GetLastError();
@@ -347,7 +373,13 @@ int CandidateScore(const PendingSnap& pending, const WindowInfo& window) {
     if (AppLauncher::IsChromeProfilePicker(pending.exeName, window.title)) return -1;
     int score = 100;
     if (pending.launchPid && window.processId == pending.launchPid) score += 100;
-    if (!pending.box.titleHint.empty() && window.title == pending.box.titleHint) score += 200;
+    if (!pending.box.titleHint.empty()) {
+        string title = window.title, hint = pending.box.titleHint;
+        transform(title.begin(), title.end(), title.begin(), [](unsigned char c) { return static_cast<char>(tolower(c)); });
+        transform(hint.begin(), hint.end(), hint.begin(), [](unsigned char c) { return static_cast<char>(tolower(c)); });
+        if (title == hint) score += 200;
+        else if (hint.size() >= 3 && title.find(hint) != string::npos) score += 150;
+    }
     if (GetWindowLongPtr(window.hwnd, GWL_STYLE) & WS_THICKFRAME) score += 20;
     return score;
 }
@@ -404,7 +436,7 @@ void ProcessPendingSnaps() {
         DWORD pid = 0;
         GetWindowThreadProcessId(check->hwnd, &pid);
         RECT actual{};
-        if (pid != check->pid || !GetWindowRect(check->hwnd, &actual)) {
+        if (pid != check->pid || !VisibleWindowRect(check->hwnd, actual)) {
             WindowScaler::ReportLaunchState(check->zone, "failed", "Window closed before placement was verified.");
             check = checks.erase(check); continue;
         }
@@ -461,14 +493,23 @@ void ProcessPendingSnaps() {
             check->due = GetTickCount64() + 1000;
             ++check; continue;
         }
+        if (check->dpiSecondPass) {
+            // Let the foreign app process WM_DPICHANGED before measuring its new
+            // frame padding and applying the final zone. Two immediate async
+            // calls can both precede the app's own DPI resize.
+            check->dpiSecondPass = false;
+            RequestTargetPlacement(check->hwnd, target, "DPI second pass");
+            check->due = GetTickCount64() + 1000;
+            ++check; continue;
+        }
         if (check->returnFromRefresh) {
             check->returnFromRefresh = false;
             RequestTargetPlacement(check->hwnd, target, "renderer return");
             check->due = GetTickCount64() + 1000;
             ++check; continue;
         }
-        const bool fits = abs(actual.left - target.left) <= 16 && abs(actual.top - target.top) <= 16 &&
-            abs(actual.right - target.right) <= 16 && abs(actual.bottom - target.bottom) <= 16;
+        const bool fits = abs(actual.left - target.left) <= 2 && abs(actual.top - target.top) <= 2 &&
+            abs(actual.right - target.right) <= 2 && abs(actual.bottom - target.bottom) <= 2;
         if (fits) {
             if (check->refreshNotion && target.right-target.left > 2) {
                 // One real size transition lets Notion relayout its renderer even
@@ -532,7 +573,7 @@ void ProcessPendingSnaps() {
         if (pending != g_pendingSnaps.end()) {
             if (job->result->success) {
                 pending->launchPid = job->result->pid;
-                if (!pending->deadline) pending->deadline = GetTickCount64() + 15000;
+                if (!pending->deadline) pending->deadline = GetTickCount64() + 120000;
                 TrackerLog("launch accepted id=" + to_string(job->id) + " pid=" + to_string(pending->launchPid));
             } else {
                 TrackerLog("launch failed id=" + to_string(job->id) + " " + job->result->error);
@@ -573,6 +614,9 @@ void ProcessPendingSnaps() {
         }
         context.release();
         pending.dispatched = true;
+        // Queue time must not consume a large application's startup allowance.
+        pending.deadline = GetTickCount64() + 120000;
+        pending.slowNoticeAt = GetTickCount64() + 15000;
     }
     const auto generation = g_pendingGeneration;
     const auto pendingSnapshot = g_pendingSnaps;
@@ -585,11 +629,17 @@ void ProcessPendingSnaps() {
         };
         if (findPending() == g_pendingSnaps.end()) continue;
         if (pending.deadline == 0) continue;
+        if (pending.slowNoticeAt && GetTickCount64() >= pending.slowNoticeAt &&
+            GetTickCount64() < pending.deadline && !pending.snappedHwnd) {
+            WindowScaler::ReportLaunchState(pending.box, "opening", "Still opening. Larger apps can take a little longer.");
+            const auto current = findPending();
+            if (current != g_pendingSnaps.end()) current->slowNoticeAt = 0;
+        }
         if (GetTickCount64() >= pending.deadline) {
             const auto progressItem = g_launchProgress.items.find(LaunchProgressState::Key(pending.box));
             if (progressItem != g_launchProgress.items.end() &&
                 (progressItem->second.state == "opening" || progressItem->second.state == "waiting"))
-                WindowScaler::ReportLaunchState(pending.box, "failed", "Application took too long to launch or is waiting for user input.");
+                WindowScaler::ReportLaunchState(pending.box, "failed", "No workspace window appeared within two minutes. Check the app for a startup prompt, then try again.");
             TrackerLog(string(pending.snappedHwnd ? "tracking completed id=" : "timeout id=") + to_string(pending.id) + " app=" + pending.exeName);
             for (const auto& job : g_launchJobs)
                 if (job.id == pending.id) job.result->cancelled.store(true);
@@ -1011,6 +1061,8 @@ bool WindowScaler::ForceSnapToBox(HWND hwnd, const SelectedBox& box) {
     // Restore standard minimized/maximized state without toggling F11 or Escape.
     // A normal window filling rcWork is not necessarily application fullscreen.
     const bool restoring = IsIconic(hwnd) || IsZoomed(hwnd);
+    const bool crossingMonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) !=
+        MonitorFromRect(&target, MONITOR_DEFAULTTONEAREST);
     RECT initial{};
     if (GetWindowRect(hwnd, &initial))
         TrackerLog("placement begin pid=" + to_string(pid) + " state=" + DescribeWindowState(hwnd, initial) +
@@ -1028,6 +1080,7 @@ bool WindowScaler::ForceSnapToBox(HWND hwnd, const SelectedBox& box) {
     if (generation != g_pendingGeneration || !IsWindow(hwnd)) return false;
     g_placementChecks.push_back({hwnd, pid, target, GetTickCount64() + 1000, 0,
                                  restoring, GetTickCount64() + 8000, notion, false, box});
+    g_placementChecks.back().dpiSecondPass = crossingMonitor;
     g_scanRequested = true;
     // This acknowledges a request; the timer verifies its actual applied rectangle.
     return true;
@@ -1102,6 +1155,8 @@ void WindowScaler::CloseBiomeSession() {
         if (session.hadPreBiomeState) {
             WINDOWPLACEMENT placement = session.preBiomePlacement;
             placement.length = sizeof(WINDOWPLACEMENT);
+            // Keep GetWindowPlacement's workspace coordinates intact. They are
+            // not screen rectangles; subtracting the taskbar again causes drift.
             SetWindowPlacement(hwnd, &placement);
             cout << "[SESSION] Restored pre-biome placement for HWND " << hwnd << endl;
         }
@@ -1393,7 +1448,6 @@ bool WindowScaler::LaunchAndTrackApp(const string& assignedApp,
     pending.exeName = exeName;
     pending.knownWindows = excludeHwnds;
     for (const auto& window : GetActiveWindows()) pending.knownWindows.insert(window.hwnd);
-    pending.deadline = GetTickCount64() + 60000;
     if (packaged) pending.expectedAumids = AppLauncher::ResolveAumidCandidates(box);
 
     if (packaged && pending.expectedAumids.empty()) {
@@ -1412,7 +1466,7 @@ bool WindowScaler::LaunchAndTrackApp(const string& assignedApp,
     }
 
     pending.fullPath = fullPath;
-    pending.deadline = GetTickCount64() + 15000; // Includes blocked launch workers and queue time.
+    pending.deadline = GetTickCount64() + 120000; // Bounded queue wait; refreshed when dispatched.
     if (generation != g_pendingGeneration) {
         StopPendingHooksIfIdle();
         outError = "workspace launch cancelled before queueing";

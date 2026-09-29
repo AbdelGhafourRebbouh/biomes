@@ -174,6 +174,22 @@ int main() {
         desktop.assignedApp = "app.exe";
         Require(AppLauncher::RequiresPackagedActivation(desktop, R"(C:\Program Files\WindowsApps\Package\app.exe)"), "resolved Store path stays protected");
 
+        const RECT visibleTarget{-1920, 40, -960, 1040};
+        const RECT outerSample{93, 100, 607, 507}, frameSample{100, 100, 600, 500};
+        const RECT expanded = OuterRectForFrame(visibleTarget, outerSample, frameSample);
+        Require(expanded.left == -1927 && expanded.top == 40 && expanded.right == -953 && expanded.bottom == 1047,
+                "visible frame target expands by invisible borders at negative screen origin");
+        const RECT staleFrame{500, 500, 1000, 1000};
+        const RECT fallback = OuterRectForFrame(visibleTarget, outerSample, staleFrame);
+        Require(EqualRect(&fallback, &visibleTarget), "stale DWM geometry falls back safely");
+        auto titlePending = Pending("Project Alpha");
+        WindowInfo titleWindow{};
+        titleWindow.processPath = titlePending.fullPath; titleWindow.processName = titlePending.exeName;
+        titleWindow.title = "project alpha - Visual Studio Code";
+        const int matchingTitle = CandidateScore(titlePending, titleWindow);
+        titleWindow.title = "Project Beta - Visual Studio Code";
+        Require(matchingTitle > CandidateScore(titlePending, titleWindow), "project title disambiguates same executable");
+
         // Physical geometry is independent of logical DPI and supports negative origins.
         for (LONG scale : {1L, 2L, 3L}) {
             work = {-12000, -12000, -12000 + 1280 * scale, -12000 + 720 * scale};
@@ -354,6 +370,23 @@ int main() {
         Require(!IsWorkspaceCandidate(chooser), "native project dialog is not the workspace");
         Reset();
 
+        auto patient = Pending("large-app");
+        patient.box.assignedApp = patient.fullPath;
+        patient.deadline = GetTickCount64() + 105000;
+        patient.slowNoticeAt = GetTickCount64() - 1;
+        g_pendingSnaps = {patient};
+        WindowScaler::BeginLaunchProgress("Slow cold start", {patient.box});
+        WindowScaler::FinishLaunchSetup();
+        ProcessPendingSnaps();
+        Require(g_launchProgress.Snapshot()["state"] == "opening" && g_launchProgress.Snapshot()["failed"] == 0,
+                "slow launch remains opening after initial notice threshold");
+        Require(g_launchProgress.Snapshot()["items"][0]["detail"] == "Still opening. Larger apps can take a little longer.",
+                "slow app receives reassuring status");
+        hwnd = Window(L"large-app", true);
+        SettleCandidate(); Tick();
+        Require(g_launchProgress.Snapshot()["state"] == "success", "late large app still snaps and completes biome");
+        Reset();
+
         auto timedOut = Pending("hung-worker");
         timedOut.box.assignedApp = timedOut.fullPath;
         timedOut.deadline = GetTickCount64() - 1;
@@ -365,7 +398,7 @@ int main() {
         ProcessPendingSnaps();
         Require(g_pendingSnaps.empty() && hungResult->cancelled.load(), "watchdog cancels tracking before worker returns");
         Require(g_launchProgress.Snapshot()["state"] == "partial", "watchdog clears spinner");
-        Require(g_launchProgress.Snapshot()["items"][0]["detail"] == "Application took too long to launch or is waiting for user input.", "watchdog error text");
+        Require(g_launchProgress.Snapshot()["items"][0]["detail"] == "No workspace window appeared within two minutes. Check the app for a startup prompt, then try again.", "watchdog error text");
         hungResult->success = true; hungResult->done = true;
         ProcessPendingSnaps();
         Require(g_pendingSnaps.empty(), "late worker cannot resurrect timed out launch");
@@ -432,7 +465,7 @@ int main() {
             }
             Require(!IsIconic(hwnd) && !IsZoomed(hwnd), "restoration reaches normal window state");
             RECT placed{}, expected{};
-            GetWindowRect(hwnd, &placed); CalculateTargetRect(Zone(), expected);
+            VisibleWindowRect(hwnd, placed); CalculateTargetRect(Zone(), expected);
             Require(EqualRect(&placed, &expected), "restored window reaches assigned zone");
             Require(g_placementChecks.empty(), "restore verification terminates");
             Reset();
@@ -504,7 +537,7 @@ int main() {
         g_placementChecks.front().retries = 1;
         work.right -= 320; Tick(); Tick();
         RECT changed{}, expectedChanged{};
-        GetWindowRect(hwnd, &changed); CalculateTargetRect(Zone(), expectedChanged);
+        VisibleWindowRect(hwnd, changed); CalculateTargetRect(Zone(), expectedChanged);
         Require(EqualRect(&changed, &expectedChanged) && g_placementChecks.empty(), "updated work area verified");
         Reset();
         hwnd = Window(); WindowScaler::ForceSnapToBox(hwnd, Zone());
@@ -549,6 +582,10 @@ int main() {
         Require(WindowScaler::ForceSnapToBox(hwnd, progressBox), "progress placement requested");
         WindowScaler::FinishLaunchSetup();
         Require(g_launchProgress.Snapshot()["ready"] == 0, "SetWindowPos acceptance not counted ready");
+        g_placementChecks.front().dpiSecondPass = true;
+        Tick();
+        Require(!g_placementChecks.empty() && !g_placementChecks.front().dpiSecondPass &&
+                g_launchProgress.Snapshot()["ready"] == 0, "DPI second pass precedes verification");
         Tick();
         Require(g_launchProgress.Snapshot()["state"] == "success", "verifier reports ready");
         Reset();

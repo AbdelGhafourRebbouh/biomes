@@ -36,6 +36,7 @@ pdf_extract.txt
 .cursor/
 .continue/
 *.swp
+__pycache__/
 
 # Temporary WebView2 cache runtime folder
 webview_data/

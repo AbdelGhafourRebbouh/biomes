@@ -43,6 +43,8 @@ jobs:
           ctest --test-dir build-stability -C Release --output-on-failure --no-tests=error
           if ($LASTEXITCODE) { throw 'Regression tests failed' }
           ./tests/release_pipeline_tests.ps1
+          python -m unittest discover -s tests -p test_download_tracker.py
+          if ($LASTEXITCODE) { throw 'Download tracker tests failed' }
       - name: Install packaging compiler
         run: |
           if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
