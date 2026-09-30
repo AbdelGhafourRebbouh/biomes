@@ -12,7 +12,7 @@
 <p align="center">Your apps, in their places. Less setup between you and the work you want to do.</p>
 
 <p align="center">
-  <a href="https://github.com/AbdelGhafourRebbouh/biomes/releases/tag/v1.0.0-beta"><img src="https://img.shields.io/badge/release-v1.0.0--beta-b8a9e6" alt="v1.0.0-beta — published prerelease"></a>
+  <a href="https://github.com/AbdelGhafourRebbouh/biomes/releases/tag/v1.0.0-beta.8"><img src="https://img.shields.io/badge/release-v1.0.0--beta.8-b8a9e6" alt="v1.0.0-beta.8 — published prerelease"></a>
   <a href="https://github.com/AbdelGhafourRebbouh/biomes/releases"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FAbdelGhafourRebbouh%2Fbiomes%2Fdownload-stats%2Fbadge.json" alt="Recorded app downloads"></a>
   <img src="https://img.shields.io/badge/Windows-10%20%2F%2011-0078D4" alt="Windows 10 and 11">
   <img src="https://img.shields.io/badge/C%2B%2B-17-00599C" alt="C++17">
@@ -21,7 +21,7 @@
 
 <p align="center">
   <a href="https://biomes-one.vercel.app/">Website</a> ·
-  <a href="https://github.com/AbdelGhafourRebbouh/biomes/releases">Download beta for Windows</a> ·
+  <a href="https://github.com/AbdelGhafourRebbouh/biomes/releases/download/v1.0.0-beta.8/biomesSetup-v1.0.0-beta.8.exe">Download beta for Windows</a> ·
   <a href="https://biomes-one.vercel.app/assets/biomes-demo.mp4">Watch the demo (video)</a>
 </p>
 
@@ -137,31 +137,31 @@ AI helps me explore those problems and iterate on possible fixes. The design dir
 
 ## ⬇️ Download & installation
 
-**v1.0.0-beta is available as a published prerelease for Windows x64.**
+**v1.0.0-beta.8 is available as a published prerelease for Windows x64.**
 
 <p align="left">
-  <a href="https://github.com/AbdelGhafourRebbouh/biomes/releases">
+  <a href="https://github.com/AbdelGhafourRebbouh/biomes/releases/download/v1.0.0-beta.8/biomesSetup-v1.0.0-beta.8.exe">
     <img src="https://img.shields.io/badge/Download-Latest%20Beta%20Installer-0078D4?style=for-the-badge&amp;logo=windows&amp;logoColor=white" alt="Download Installer">
   </a>
-  <a href="https://github.com/AbdelGhafourRebbouh/biomes/releases">
-    <img src="https://img.shields.io/badge/GitHub-View%20Releases-2ea44f?style=for-the-badge&amp;logo=github&amp;logoColor=white" alt="View Releases">
+  <a href="https://github.com/AbdelGhafourRebbouh/biomes/releases/tag/v1.0.0-beta.8">
+    <img src="https://img.shields.io/badge/GitHub-View%20Release-2ea44f?style=for-the-badge&amp;logo=github&amp;logoColor=white" alt="View beta.8 release">
   </a>
 </p>
 
-- [v1.0.0-beta release notes](https://github.com/AbdelGhafourRebbouh/biomes/releases/tag/v1.0.0-beta)
+- [v1.0.0-beta.8 release notes](https://github.com/AbdelGhafourRebbouh/biomes/releases/tag/v1.0.0-beta.8)
 - [All releases](https://github.com/AbdelGhafourRebbouh/biomes/releases) · [Project website](https://biomes-one.vercel.app/)
 
 Download history: [app download report](https://github.com/AbdelGhafourRebbouh/biomes/tree/download-stats). Counts include installers and distribution ZIPs, retain previously observed retired assets, and exclude update-feed/checksum requests. Tracking starts with the first successful tracker run; earlier lost counts cannot be reconstructed.
 
 ### Updates
 
-The download button uses one permanent address:
+The download button directly downloads the v1.0.0-beta.8 installer:
 
 ```text
-https://github.com/AbdelGhafourRebbouh/biomes/releases
+https://github.com/AbdelGhafourRebbouh/biomes/releases/download/v1.0.0-beta.8/biomesSetup-v1.0.0-beta.8.exe
 ```
 
-Use this address wherever you share biomes, then select the installer from the newest versioned beta release. The old rolling beta/biomesSetup.exe link is retained for historical downloads and no longer updates.
+This direct link stays on beta.8. For future versions, update the installer link or visit [all releases](https://github.com/AbdelGhafourRebbouh/biomes/releases). The old rolling beta/biomesSetup.exe link no longer updates.
 
 Releases are published only when a new version tag (`v1.0.0-beta.N`) is pushed. Routine code and documentation pushes do not publish releases. Versioned installers are never replaced, preserving their download counters. Only update discovery metadata is refreshed; installed apps still receive update notifications.
 
@@ -253,7 +253,7 @@ Generated builds, temporary browser profiles, and distribution binaries are excl
 
 - [x] Windows workspace layouts, multi-monitor grids, tray lifetime, and global hotkeys.
 - [x] Local persistence, launch progress, UI recovery, and per-user beta installer.
-- [x] Publish [v1.0.0-beta release notes]([https://github.com/AbdelGhafourRebbouh/biomes/releases/tag/v1.0.0-beta](https://github.com/AbdelGhafourRebbouh/biomes/releases))for Windows x64.
+- [x] Publish [v1.0.0-beta](https://github.com/AbdelGhafourRebbouh/biomes/releases/tag/v1.0.0-beta) for Windows x64.
 - [ ] Improve beta compatibility from real-world feedback.
 - [ ] Publish and validate WinGet and/or Scoop manifests, then document installation commands.
 - [ ] Fund Windows code signing.
