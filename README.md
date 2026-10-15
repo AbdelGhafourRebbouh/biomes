@@ -1,8 +1,8 @@
 # biomes app downloads
 
-Recorded total: **216**
+Recorded total: **217**
 
-Updated: 2026-10-14T08:51:54.763457+00:00
+Updated: 2026-10-15T08:27:04.394645+00:00
 
 Installers and distribution ZIPs only. Includes repeat downloads and updates.
 Retired assets retain their highest observed counts. Previously lost downloads cannot be reconstructed.
@@ -18,7 +18,7 @@ Daily increases are observed differences, not exact download dates; the first sn
 | v1.0.0-beta.5 | 0 |
 | v1.0.0-beta.6 | 0 |
 | v1.0.0-beta.7 | 15 |
-| v1.0.0-beta.8 | 101 |
+| v1.0.0-beta.8 | 102 |
 
 | Day (UTC) | Total | Observed increase |
 | --- | ---: | ---: |
@@ -38,5 +38,6 @@ Daily increases are observed differences, not exact download dates; the first sn
 | 2026-10-12 | 210 | 7 |
 | 2026-10-13 | 212 | 2 |
 | 2026-10-14 | 216 | 4 |
+| 2026-10-15 | 217 | 1 |
 
 Daily snapshots: [daily/](daily/). Asset IDs and history: [downloads.json](downloads.json).
