@@ -2,7 +2,7 @@
 
 Recorded total: **274**
 
-Updated: 2026-11-15T11:15:16.144273+00:00
+Updated: 2026-11-16T11:46:04.291949+00:00
 
 Installers and distribution ZIPs only. Includes repeat downloads and updates.
 Retired assets retain their highest observed counts. Previously lost downloads cannot be reconstructed.
@@ -22,7 +22,6 @@ Daily increases are observed differences, not exact download dates; the first sn
 
 | Day (UTC) | Total | Observed increase |
 | --- | ---: | ---: |
-| 2026-10-17 | 226 | 4 |
 | 2026-10-18 | 230 | 4 |
 | 2026-10-19 | 236 | 6 |
 | 2026-10-20 | 239 | 3 |
@@ -52,5 +51,6 @@ Daily increases are observed differences, not exact download dates; the first sn
 | 2026-11-13 | 270 | 4 |
 | 2026-11-14 | 271 | 1 |
 | 2026-11-15 | 274 | 3 |
+| 2026-11-16 | 274 | 0 |
 
 Daily snapshots: [daily/](daily/). Asset IDs and history: [downloads.json](downloads.json).
